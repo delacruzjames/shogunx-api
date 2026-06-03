@@ -7,6 +7,11 @@ Rails.application.routes.draw do
     namespace :v1 do
       defaults format: :json do
         resources :signals, only: :create
+        resource :execution, only: :show, controller: "execution"
+        resource :statistics, only: :show
+        resources :positions, only: :create
+        resources :position_updates, only: :create
+        resources :order_updates, only: :create
       end
     end
   end

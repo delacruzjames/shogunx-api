@@ -13,6 +13,6 @@ class OrderExpiryJob < ApplicationJob
     Order
       .where(status: "pending")
       .where.not(expires_at: nil)
-      .where(expires_at: ...Time.current)
+      .where(expires_at: ..Time.current)
   end
 end

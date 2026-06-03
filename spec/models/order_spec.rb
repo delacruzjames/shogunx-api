@@ -47,6 +47,30 @@ RSpec.describe Order, type: :model do
       expect(order.trade_signal).to eq(trade_signal)
     end
 
+    it "has many execution audit logs" do
+      trade_signal = build_trade_signal
+      order = described_class.create!(
+        trade_signal: trade_signal,
+        action: "BUY",
+        entry_type: "BUY_LIMIT",
+        entry_price: 3350,
+        stop_loss: 3335,
+        take_profit: 3380,
+        risk_reward: 2.0,
+        status: :placed
+      )
+
+      log = ExecutionAuditLog.create!(
+        order: order,
+        source: "order_updates",
+        event_status: "placed",
+        ticket: "1",
+        payload: { "status" => "placed" }
+      )
+
+      expect(order.execution_audit_logs).to include(log)
+    end
+
     it "allows multiple orders per trade signal" do
       trade_signal = build_trade_signal
 

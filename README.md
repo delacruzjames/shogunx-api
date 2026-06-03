@@ -67,7 +67,27 @@ Source: [`mt4/ShogunX.mq4`](mt4/ShogunX.mq4)
 
   `timeframe` is the chart period; `price` is **Bid**; `rsi` / `ema50` / `ema200` from built-in indicators; `support` / `resistance` are the lowest low and highest high over **SupportResistanceBars** (default 20).
 
-- Logs HTTP status and the Rails JSON response (`status`, `snapshot_id`, `action`) in the **Experts** tab. Order execution from the response will be added once the full pipeline returns approved orders.
+- Parses the flat Rails JSON response and places pending orders when approved:
+  - `HOLD` — no trade (logs `reason`)
+  - `BUY_LIMIT` / `SELL_LIMIT` / `BUY_STOP` / `SELL_STOP` — `OrderSend` with `LotSize`, `MagicNumber`, SL/TP from Rails
+  - Skips duplicate `order_id` values (global variable + open-order comment `ShogunX#<id>`)
+  - **POST**s `order_updates` for order lifecycle: `placed`, `triggered`, `cancelled`, `expired`, `closed`
+  - **POST**s `position_updates` for position lifecycle: `open` (with `entry_price`), `closed` (with `profit_loss`)
+  - Each callback updates Rails state and appends an `ExecutionAuditLog`
+  - Polls open/history orders every **OrderPollSeconds** (default 5) via `OnTick`
+
+#### MT4 → Rails feedback loop
+
+| Step | Endpoint | Payload |
+|------|----------|---------|
+| Pending order sent | `POST /api/v1/order_updates` | `{ order_id, ticket, status: "placed" }` |
+| Pending order fills | `POST /api/v1/order_updates` | `{ order_id, ticket, status: "triggered" }` |
+| Position open | `POST /api/v1/position_updates` | `{ order_id, ticket, status: "open", entry_price }` |
+| Position closed | `POST /api/v1/position_updates` | `{ order_id, ticket, status: "closed", profit_loss }` |
+| Order closed (optional) | `POST /api/v1/order_updates` | `{ order_id, ticket, status: "closed", profit_loss }` |
+
+Rails tracks: pending → placed → triggered → open position → closed position + `TradePerformance`, with full audit trail in `execution_audit_logs`.
+- Logs all actions in the **Experts** tab (`VerboseLog=true`).
 
 ### Connect to local API
 
@@ -141,6 +161,20 @@ make status            # verify http://localhost:3000/up
 
 Common commands: `make logs`, `make console`, `make test`, `make down`.
 
+### News filter (ForexFactory)
+
+`NewsFilterService` syncs high-impact USD events from the [ForexFactory calendar](https://nfs.faireconomy.media/ff_calendar_thisweek.json) and blocks new trades from **30 minutes before** through **30 minutes after** each release. `RiskRuleService` surfaces the rejection as `high impact USD news: <event title>`.
+
+Background sync: `ForexFactoryCalendarSyncJob` (respects a 5-minute throttle). Set `FOREXFACTORY_SYNC_ON_FILTER=true` to refresh on every risk check (default in production).
+
+### Trade statistics (dashboard)
+
+`GET /api/v1/statistics` — aggregated from closed `TradePerformance` records via `TradePerformanceService`.
+
+Query params (optional): `from`, `to`, `symbol`, `daily_days` (default 30), `monthly_months` (default 12).
+
+Response includes `summary` (total trades, wins, losses, win rate, profit factor, average RR, P/L totals), `daily_pnl`, and `monthly_pnl` time series.
+
 ### CI locally (RuboCop + RSpec)
 
 After changing the `Gemfile`, install gems in Docker once:
@@ -168,7 +202,8 @@ Optional env vars: `APP_PORT` (default `3000`), `DB_PORT` (default `5433`).
 | Variable | Description |
 |----------|-------------|
 | `SHOGUNX_API_KEY` | Planned: secret the MT4 EA will send as `X-ShogunX-Api-Key` (not in EA yet) |
-| `OPENAI_API_KEY` | OpenAI API key for the Brain layer |
+| `OPENAI_API_KEY` | OpenAI API key for `OpenaiAnalysisService` (required for live analysis) |
+| `OPENAI_MODEL` | Optional model override (default `gpt-4o-mini`) |
 | `RAILS_MASTER_KEY` | Rails credentials key (auto-loaded from `config/master.key` in dev) |
 
 ## Tech stack

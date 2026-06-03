@@ -1,30 +1,30 @@
 class Position < ApplicationRecord
   ACTIONS = Order::ACTIONS
-  STATUSES = %w[open closed].freeze
 
   belongs_to :order
+  has_one :trade_performance, dependent: :destroy
+  has_many :execution_audit_logs, dependent: :destroy
 
+  enum :status, {
+    open: "open",
+    closed: "closed",
+    cancelled: "cancelled"
+  }, default: :open, validate: true
+
+  validates :ticket, presence: true, uniqueness: true
   validates :symbol, presence: true
   validates :action, presence: true, inclusion: { in: ACTIONS }
-  validates :volume, :open_price, :stop_loss, :take_profit,
+  validates :entry_price, :stop_loss, :take_profit,
     presence: true,
     numericality: { greater_than: 0 }
-  validates :status, presence: true, inclusion: { in: STATUSES }
-  validates :mt4_ticket, presence: true, uniqueness: true
-  validates :opened_at, presence: true
-  validate :closed_fields_present, if: :closed?
+  validates :opened_at, presence: true, if: :open?
+  validate :closed_at_present, if: -> { closed? || cancelled? }
 
-  scope :open, -> { where(status: "open") }
-  scope :closed, -> { where(status: "closed") }
-
-  def closed?
-    status == "closed"
-  end
+  scope :open_positions, -> { open }
 
   private
 
-  def closed_fields_present
+  def closed_at_present
     errors.add(:closed_at, "can't be blank") if closed_at.blank?
-    errors.add(:close_price, "can't be blank") if close_price.blank?
   end
 end

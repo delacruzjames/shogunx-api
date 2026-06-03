@@ -1,6 +1,7 @@
 require "rails_helper"
 
 RSpec.describe OrderExpiryJob, type: :job do
+  include ActiveSupport::Testing::TimeHelpers
   def create_pending_order(expires_at:, status: "pending")
     snapshot = MarketSnapshot.create!(
       symbol: "XAUUSD",
@@ -38,6 +39,18 @@ RSpec.describe OrderExpiryJob, type: :job do
       order = create_pending_order(expires_at: 1.hour.ago)
 
       described_class.perform_now
+
+      expect(order.reload.status).to eq("expired")
+    end
+
+    it "expires pending orders when expires_at equals the current time" do
+      freeze_time = Time.zone.parse("2026-06-03 12:00:00")
+      order = nil
+
+      travel_to freeze_time do
+        order = create_pending_order(expires_at: freeze_time)
+        described_class.perform_now
+      end
 
       expect(order.reload.status).to eq("expired")
     end

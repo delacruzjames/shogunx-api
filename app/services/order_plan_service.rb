@@ -20,6 +20,10 @@ class OrderPlanService
     plan = call
     return nil if plan.nil?
 
+    create_order_from_plan!(plan)
+  end
+
+  def create_order_from_plan!(plan)
     Order.create!(
       trade_signal: @trade_signal,
       action: plan[:action],

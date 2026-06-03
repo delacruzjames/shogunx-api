@@ -20,10 +20,14 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     command: ["./bin/rails", "server", "-b", "0.0.0.0"]
+    env_file:
+      - .env
     environment:
       RAILS_ENV: development
       DATABASE_URL: postgres://postgres:postgres@db:5432/shogunx_api_development
       RAILS_MASTER_KEY: ${RAILS_MASTER_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
     ports:
       - "${APP_PORT:-3000}:3000"
       # MT4 WebRequest only supports http:80 / https:443 (not :3000)

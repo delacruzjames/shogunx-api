@@ -1,17 +1,55 @@
 class OpenaiAnalysisService
-  DEFAULT_SYMBOL = "XAUUSD"
+  class Error < StandardError; end
+  class ApiError < Error; end
+  class ParseError < Error; end
+
+  MAX_RETRIES = 3
+  DEFAULT_MODEL = "gpt-4o-mini"
   ANALYSIS_TIMEFRAME = "H4"
 
-  BUY_RSI_RANGE = (50..70).freeze
-  SELL_RSI_RANGE = (30..50).freeze
+  PROMPT_TEMPLATE = <<~PROMPT
+    You are a professional XAUUSD trader.
 
-  def initialize(symbol: DEFAULT_SYMBOL, summary_service: nil)
-    @symbol = symbol
+    Analyze the following market summary.
+
+    Return ONLY JSON:
+
+    {
+      "action": "BUY|SELL|WAIT",
+      "confidence": 0-100,
+      "timeframe": "H4",
+      "reason": "short explanation"
+    }
+
+    Consider:
+
+    - trend
+    - momentum
+    - support/resistance
+    - risk/reward
+
+    Market Summary:
+    %{summary}
+  PROMPT
+
+  def initialize(market_snapshot:, symbol: nil, summary_service: nil, chat_client: nil, max_retries: MAX_RETRIES)
+    @market_snapshot = market_snapshot
+    @symbol = symbol || market_snapshot.symbol
     @summary_service = summary_service
+    @chat_client = chat_client
+    @max_retries = max_retries
   end
 
   def call
-    analyze(market_summary)
+    summary = market_summary
+    analysis =
+      if insufficient_data?(summary)
+        wait_analysis("Insufficient market data for analysis")
+      else
+        analyze_with_openai(summary)
+      end
+
+    create_trade_signal!(analysis)
   end
 
   def market_summary
@@ -24,57 +62,120 @@ class OpenaiAnalysisService
     @summary_service ||= MarketSummaryService.new(symbol: @symbol)
   end
 
-  def analyze(summary)
-    ema50 = summary[:current_ema50]
-    ema200 = summary[:current_ema200]
-    rsi = summary[:current_rsi]
-
-    if ema50.nil? || ema200.nil? || rsi.nil?
-      return wait_signal("Insufficient market data for analysis")
-    end
-
-    rsi_value = rsi.to_f
-    ema50_value = ema50.to_f
-    ema200_value = ema200.to_f
-
-    if buy_conditions?(ema50_value, ema200_value, rsi_value)
-      return buy_signal(rsi_value)
-    end
-
-    if sell_conditions?(ema50_value, ema200_value, rsi_value)
-      return sell_signal(rsi_value)
-    end
-
-    wait_signal(wait_reason(ema50_value, ema200_value, rsi_value))
+  def chat_client
+    @chat_client ||= Openai::ChatClient.build
   end
 
-  def buy_conditions?(ema50, ema200, rsi)
-    ema50 > ema200 && BUY_RSI_RANGE.cover?(rsi)
+  def insufficient_data?(summary)
+    summary[:snapshot_count].to_i.zero? ||
+      summary[:current_price].nil? ||
+      summary[:average_rsi].nil? ||
+      summary[:current_ema50].nil? ||
+      summary[:current_ema200].nil?
   end
 
-  def sell_conditions?(ema50, ema200, rsi)
-    ema50 < ema200 && SELL_RSI_RANGE.cover?(rsi)
+  def analyze_with_openai(summary)
+    return wait_analysis("OpenAI API key not configured") if @chat_client.nil? && api_key.blank?
+
+    with_retries do
+      prompt = build_prompt(summary)
+      log_prompt(prompt)
+      content = request_chat(prompt)
+      log_response(content)
+      normalize_analysis(parse_response(content))
+    end
+  rescue Error => error
+    wait_analysis("OpenAI analysis failed: #{error.message}")
   end
 
-  def buy_signal(rsi)
+  def with_retries
+    attempt = 0
+
+    begin
+      attempt += 1
+      yield
+    rescue ApiError, ParseError => error
+      raise error if attempt >= @max_retries
+
+      sleep(attempt * 0.5)
+      retry
+    end
+  end
+
+  def build_prompt(summary)
+    format(PROMPT_TEMPLATE, summary: format_summary(summary))
+  end
+
+  def format_summary(summary)
+    <<~SUMMARY.strip
+      symbol: #{summary[:symbol]}
+      current_price: #{summary[:current_price]}
+      average_rsi: #{summary[:average_rsi]}
+      ema50_trend: #{summary[:ema50_trend]}
+      ema200_trend: #{summary[:ema200_trend]}
+      support: #{summary[:support]}
+      resistance: #{summary[:resistance]}
+      timeframe: #{summary[:timeframe] || ANALYSIS_TIMEFRAME}
+    SUMMARY
+  end
+
+  def request_chat(prompt)
+    response = chat_client.chat(
+      parameters: {
+        model: model,
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: "You are a professional XAUUSD trader. Respond only with valid JSON."
+          },
+          { role: "user", content: prompt }
+        ]
+      }
+    )
+
+    content = response.dig("choices", 0, "message", "content")
+    raise ApiError, "Empty response from OpenAI" if content.blank?
+
+    content
+  rescue Faraday::Error, ::OpenAI::Error => error
+    raise ApiError, error.message
+  end
+
+  def parse_response(content)
+    cleaned = content.to_s.strip
+    cleaned = cleaned.gsub(/\A```json\s*/i, "").gsub(/\A```\s*/, "").gsub(/```\z/, "").strip
+
+    JSON.parse(cleaned)
+  rescue JSON::ParserError => error
+    raise ParseError, error.message
+  end
+
+  def normalize_analysis(payload)
+    action = payload["action"].to_s.upcase
+    raise ParseError, "Invalid action: #{action}" unless TradeSignal::ACTIONS.include?(action)
+
     {
-      action: "BUY",
-      confidence: band_confidence(rsi, BUY_RSI_RANGE),
-      timeframe: ANALYSIS_TIMEFRAME,
-      reason: "EMA50 above EMA200 with RSI #{format_rsi(rsi)} in 50–70 range"
+      action: action,
+      confidence: payload["confidence"].to_i.clamp(0, 100),
+      timeframe: payload["timeframe"].presence || ANALYSIS_TIMEFRAME,
+      reason: payload["reason"].to_s.presence || "No reason provided"
     }
   end
 
-  def sell_signal(rsi)
-    {
-      action: "SELL",
-      confidence: band_confidence(rsi, SELL_RSI_RANGE),
-      timeframe: ANALYSIS_TIMEFRAME,
-      reason: "EMA50 below EMA200 with RSI #{format_rsi(rsi)} in 30–50 range"
-    }
+  def create_trade_signal!(analysis)
+    TradeSignal.create!(
+      market_snapshot: @market_snapshot,
+      symbol: @symbol,
+      action: analysis[:action],
+      confidence: analysis[:confidence],
+      timeframe: analysis[:timeframe],
+      reason: analysis[:reason]
+    )
   end
 
-  def wait_signal(reason)
+  def wait_analysis(reason)
     {
       action: "WAIT",
       confidence: 0,
@@ -83,29 +184,19 @@ class OpenaiAnalysisService
     }
   end
 
-  def wait_reason(ema50, ema200, rsi)
-    if ema50 > ema200
-      return "Bullish EMA trend but RSI #{format_rsi(rsi)} outside 50–70 buy range"
-    end
-
-    if ema50 < ema200
-      return "Bearish EMA trend but RSI #{format_rsi(rsi)} outside 30–50 sell range"
-    end
-
-    "EMA50 and EMA200 aligned; RSI #{format_rsi(rsi)} does not meet entry rules"
+  def api_key
+    ENV["OPENAI_API_KEY"].presence
   end
 
-  def band_confidence(rsi, range)
-    min = range.begin.to_f
-    max = range.end.to_f
-    span = max - min
-
-    return 50 if span.zero?
-
-    (((rsi - min) / span) * 100).round.clamp(1, 100)
+  def model
+    ENV.fetch("OPENAI_MODEL", DEFAULT_MODEL)
   end
 
-  def format_rsi(rsi)
-    format("%.2f", rsi)
+  def log_prompt(prompt)
+    Rails.logger.info("[OpenaiAnalysisService] prompt=#{prompt}")
+  end
+
+  def log_response(content)
+    Rails.logger.info("[OpenaiAnalysisService] response=#{content}")
   end
 end

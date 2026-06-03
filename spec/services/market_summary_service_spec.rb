@@ -13,7 +13,10 @@ RSpec.describe MarketSummaryService do
         current_ema200: nil,
         support: nil,
         resistance: nil,
+        timeframe: nil,
         trend: "neutral",
+        ema50_trend: "unknown",
+        ema200_trend: "unknown",
         average_rsi: nil,
         snapshot_count: 0
       )

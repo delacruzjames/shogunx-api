@@ -36,7 +36,10 @@ class MarketSummaryService
       current_ema200: current.ema200,
       support: current.support,
       resistance: current.resistance,
+      timeframe: current.timeframe,
       trend: determine_trend(current),
+      ema50_trend: ema_trend(:ema50),
+      ema200_trend: ema_trend(:ema200),
       average_rsi: average_rsi,
       snapshot_count: snapshots.size
     }
@@ -51,10 +54,24 @@ class MarketSummaryService
       current_ema200: nil,
       support: nil,
       resistance: nil,
+      timeframe: nil,
       trend: "neutral",
+      ema50_trend: "unknown",
+      ema200_trend: "unknown",
       average_rsi: nil,
       snapshot_count: 0
     }
+  end
+
+  def ema_trend(field)
+    values = snapshots.reverse.map { |snapshot| snapshot.public_send(field) }.compact
+    return "unknown" if values.size < 2
+
+    oldest, latest = values.first, values.last
+    return "rising" if latest > oldest
+    return "falling" if latest < oldest
+
+    "flat"
   end
 
   def determine_trend(snapshot)

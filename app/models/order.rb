@@ -4,6 +4,7 @@ class Order < ApplicationRecord
 
   belongs_to :trade_signal
   has_one :position, dependent: :destroy
+  has_many :execution_audit_logs, dependent: :destroy
 
   enum :status, {
     pending: "pending",

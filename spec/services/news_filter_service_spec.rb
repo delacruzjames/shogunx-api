@@ -1,0 +1,92 @@
+require "rails_helper"
+
+RSpec.describe NewsFilterService do
+  def create_high_impact_event(scheduled_at:, currency: "USD", impact: "high")
+    EconomicEvent.create!(
+      source: "manual",
+      currency: currency,
+      impact: impact,
+      title: "Test Event",
+      scheduled_at: scheduled_at
+    )
+  end
+
+  describe "#call" do
+    it "allows trading when there is no high-impact USD news" do
+      result = described_class.new(sync_calendar: false).call
+
+      expect(result).to eq(allowed: true, reason: "clear of high impact news")
+    end
+
+    it "blocks trading 30 minutes before high-impact news" do
+      now = Time.zone.parse("2026-06-03 12:00:00")
+      create_high_impact_event(scheduled_at: now + 30.minutes)
+
+      result = described_class.new(at: now, sync_calendar: false).call
+
+      expect(result[:allowed]).to be(false)
+      expect(result[:reason]).to eq("high impact USD news: Test Event")
+    end
+
+    it "blocks trading 30 minutes after high-impact news" do
+      now = Time.zone.parse("2026-06-03 12:00:00")
+      create_high_impact_event(scheduled_at: now - 30.minutes)
+
+      result = described_class.new(at: now, sync_calendar: false).call
+
+      expect(result[:allowed]).to be(false)
+      expect(result[:reason]).to eq("high impact USD news: Test Event")
+    end
+
+    it "blocks trading during the news release" do
+      now = Time.zone.parse("2026-06-03 12:00:00")
+      create_high_impact_event(scheduled_at: now)
+
+      result = described_class.new(at: now, sync_calendar: false).call
+
+      expect(result[:allowed]).to be(false)
+      expect(result[:reason]).to eq("high impact USD news: Test Event")
+    end
+
+    it "allows trading just outside the 30-minute buffer" do
+      now = Time.zone.parse("2026-06-03 12:00:00")
+      create_high_impact_event(scheduled_at: now + 31.minutes)
+
+      result = described_class.new(at: now, sync_calendar: false).call
+
+      expect(result[:allowed]).to be(true)
+    end
+
+    it "ignores medium-impact events" do
+      now = Time.zone.parse("2026-06-03 12:00:00")
+      create_high_impact_event(scheduled_at: now, impact: "medium")
+
+      result = described_class.new(at: now, sync_calendar: false).call
+
+      expect(result[:allowed]).to be(true)
+    end
+
+    it "ignores non-USD high-impact events" do
+      now = Time.zone.parse("2026-06-03 12:00:00")
+      event = create_high_impact_event(scheduled_at: now)
+      event.update_column(:currency, "EUR")
+
+      result = described_class.new(at: now, sync_calendar: false).call
+
+      expect(result[:allowed]).to be(true)
+    end
+
+    it "syncs ForexFactory before checking the calendar" do
+      sync = instance_double(
+        ForexFactoryCalendarSyncService,
+        call: ForexFactoryCalendarSyncService::Result.new(success?: true, imported_count: 0, errors: [])
+      )
+      allow(ForexFactoryCalendarSyncService).to receive(:new).and_return(sync)
+
+      described_class.new(sync_calendar: true).call
+
+      expect(ForexFactoryCalendarSyncService).to have_received(:new)
+      expect(sync).to have_received(:call)
+    end
+  end
+end

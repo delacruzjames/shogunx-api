@@ -1,10 +1,10 @@
 require "rails_helper"
 
 RSpec.describe OpenaiAnalysisService do
-  def create_snapshot(ema50:, ema200:, rsi:, price: 4448.87)
+  def create_snapshot(ema50:, ema200:, rsi:, price: 4448.87, timeframe: "H4")
     MarketSnapshot.create!(
       symbol: "XAUUSD",
-      timeframe: "H4",
+      timeframe: timeframe,
       price: price,
       rsi: rsi,
       ema50: ema50,
@@ -14,108 +14,174 @@ RSpec.describe OpenaiAnalysisService do
     )
   end
 
+  def service_for(snapshot, chat_client:, max_retries: 3)
+    described_class.new(
+      market_snapshot: snapshot,
+      chat_client: chat_client,
+      max_retries: max_retries
+    )
+  end
+
   describe "#call" do
-    it "returns WAIT when there is no market data" do
-      result = described_class.new.call
+    it "returns WAIT without calling OpenAI when the API key is missing" do
+      snapshot = create_snapshot(ema50: 4490, ema200: 4470, rsi: 60)
+      original_key = ENV.delete("OPENAI_API_KEY")
 
-      expect(result).to eq(
-        action: "WAIT",
-        confidence: 0,
+      trade_signal = described_class.new(market_snapshot: snapshot).call
+
+      ENV["OPENAI_API_KEY"] = original_key || "test-openai-key"
+
+      expect(trade_signal.action).to eq("WAIT")
+      expect(trade_signal.reason).to include("OpenAI API key not configured")
+    end
+
+    it "returns WAIT without calling OpenAI when market data is insufficient" do
+      snapshot = MarketSnapshot.create!(
+        symbol: "XAUUSD",
         timeframe: "H4",
-        reason: "Insufficient market data for analysis"
+        price: 4500,
+        rsi: nil,
+        ema50: nil,
+        ema200: nil
       )
+      chat_client = instance_double(Openai::ChatClient)
+      expect(chat_client).not_to receive(:chat)
+
+      trade_signal = service_for(snapshot, chat_client: chat_client).call
+
+      expect(trade_signal.action).to eq("WAIT")
+      expect(trade_signal.confidence).to eq(0)
+      expect(trade_signal.reason).to include("Insufficient market data")
     end
 
-    it "returns BUY when ema50 > ema200 and RSI is between 50 and 70" do
-      create_snapshot(ema50: 4490, ema200: 4470, rsi: 60)
-
-      result = described_class.new.call
-
-      expect(result[:action]).to eq("BUY")
-      expect(result[:confidence]).to eq(50)
-      expect(result[:timeframe]).to eq("H4")
-      expect(result[:reason]).to include("EMA50 above EMA200")
-      expect(result[:reason]).to include("50–70")
-    end
-
-    it "returns higher BUY confidence when RSI is near the top of the buy band" do
-      create_snapshot(ema50: 4490, ema200: 4470, rsi: 70)
-
-      result = described_class.new.call
-
-      expect(result[:action]).to eq("BUY")
-      expect(result[:confidence]).to eq(100)
-    end
-
-    it "returns SELL when ema50 < ema200 and RSI is between 30 and 50" do
-      create_snapshot(ema50: 4470, ema200: 4490, rsi: 40)
-
-      result = described_class.new.call
-
-      expect(result[:action]).to eq("SELL")
-      expect(result[:confidence]).to eq(50)
-      expect(result[:timeframe]).to eq("H4")
-      expect(result[:reason]).to include("EMA50 below EMA200")
-      expect(result[:reason]).to include("30–50")
-    end
-
-    it "returns higher SELL confidence when RSI is near the top of the sell band" do
-      create_snapshot(ema50: 4470, ema200: 4490, rsi: 50)
-
-      result = described_class.new.call
-
-      expect(result[:action]).to eq("SELL")
-      expect(result[:confidence]).to eq(100)
-    end
-
-    it "returns WAIT when trend is bullish but RSI is outside the buy band" do
-      create_snapshot(ema50: 4490, ema200: 4470, rsi: 45)
-
-      result = described_class.new.call
-
-      expect(result).to eq(
-        action: "WAIT",
-        confidence: 0,
-        timeframe: "H4",
-        reason: "Bullish EMA trend but RSI 45.00 outside 50–70 buy range"
+    it "creates a TradeSignal from a mocked OpenAI BUY response" do
+      snapshot = create_snapshot(ema50: 4490, ema200: 4470, rsi: 60)
+      chat_client = openai_json_response(
+        action: "BUY",
+        confidence: 82,
+        reason: "Momentum favors longs above support"
       )
+
+      expect {
+        service_for(snapshot, chat_client: chat_client).call
+      }.to change(TradeSignal, :count).by(1)
+
+      trade_signal = TradeSignal.last
+      expect(trade_signal.market_snapshot).to eq(snapshot)
+      expect(trade_signal.action).to eq("BUY")
+      expect(trade_signal.confidence).to eq(82)
+      expect(trade_signal.timeframe).to eq("H4")
+      expect(trade_signal.reason).to eq("Momentum favors longs above support")
     end
 
-    it "returns WAIT when trend is bearish but RSI is outside the sell band" do
-      create_snapshot(ema50: 4470, ema200: 4490, rsi: 55)
-
-      result = described_class.new.call
-
-      expect(result).to eq(
-        action: "WAIT",
-        confidence: 0,
-        timeframe: "H4",
-        reason: "Bearish EMA trend but RSI 55.00 outside 30–50 sell range"
+    it "creates a TradeSignal from a mocked OpenAI SELL response" do
+      snapshot = create_snapshot(ema50: 4470, ema200: 4490, rsi: 40)
+      chat_client = openai_json_response(
+        action: "SELL",
+        confidence: 75,
+        reason: "Bearish EMA stack with weak momentum"
       )
+
+      trade_signal = service_for(snapshot, chat_client: chat_client).call
+
+      expect(trade_signal.action).to eq("SELL")
+      expect(trade_signal.confidence).to eq(75)
     end
 
-    it "returns WAIT when EMA50 equals EMA200" do
-      create_snapshot(ema50: 4480, ema200: 4480, rsi: 60)
+    it "sends the market summary in the prompt" do
+      snapshot = create_snapshot(ema50: 4490, ema200: 4470, rsi: 60, price: 4500)
+      chat_client = openai_json_response(action: "WAIT", confidence: 0, reason: "No setup")
 
-      result = described_class.new.call
+      allow(chat_client).to receive(:chat).and_return(
+        "choices" => [ { "message" => { "content" => { action: "WAIT", confidence: 0, timeframe: "H4", reason: "No setup" }.to_json } } ]
+      )
 
-      expect(result[:action]).to eq("WAIT")
-      expect(result[:confidence]).to eq(0)
-      expect(result[:reason]).to include("EMA50 and EMA200 aligned")
+      service_for(snapshot, chat_client: chat_client).call
+
+      expect(chat_client).to have_received(:chat) do |parameters:|
+        prompt = parameters[:messages].last[:content]
+        expect(prompt).to include("current_price: 4500")
+        expect(prompt).to include("average_rsi: 60")
+        expect(prompt).to include("ema50_trend:")
+        expect(prompt).to include("timeframe: H4")
+      end
+    end
+
+    it "logs the prompt and response" do
+      snapshot = create_snapshot(ema50: 4490, ema200: 4470, rsi: 60)
+      chat_client = openai_json_response(action: "BUY", confidence: 80, reason: "Trend aligned")
+
+      allow(Rails.logger).to receive(:info)
+
+      service_for(snapshot, chat_client: chat_client).call
+
+      expect(Rails.logger).to have_received(:info).with(/\[OpenaiAnalysisService\] prompt=/)
+      expect(Rails.logger).to have_received(:info).with(/\[OpenaiAnalysisService\] response=/)
+    end
+
+    it "retries on parse errors and eventually returns WAIT" do
+      snapshot = create_snapshot(ema50: 4490, ema200: 4470, rsi: 60)
+      chat_client = openai_chat_client(content: "not-json")
+      allow(chat_client).to receive(:chat).and_return(
+        "choices" => [ { "message" => { "content" => "not-json" } } ]
+      )
+
+      trade_signal = service_for(snapshot, chat_client: chat_client, max_retries: 2).call
+
+      expect(trade_signal.action).to eq("WAIT")
+      expect(trade_signal.reason).to include("OpenAI analysis failed")
+      expect(chat_client).to have_received(:chat).twice
+    end
+
+    it "retries on API errors" do
+      snapshot = create_snapshot(ema50: 4490, ema200: 4470, rsi: 60)
+      chat_client = instance_double(Openai::ChatClient)
+      attempts = 0
+
+      allow(chat_client).to receive(:chat) do
+        attempts += 1
+        raise Faraday::ConnectionFailed, "timeout" if attempts < 2
+
+        {
+          "choices" => [
+            { "message" => { "content" => { action: "BUY", confidence: 80, timeframe: "H4", reason: "Recovered" }.to_json } }
+          ]
+        }
+      end
+
+      trade_signal = service_for(snapshot, chat_client: chat_client, max_retries: 3).call
+
+      expect(trade_signal.action).to eq("BUY")
+      expect(chat_client).to have_received(:chat).twice
+    end
+
+    it "parses fenced JSON responses" do
+      snapshot = create_snapshot(ema50: 4490, ema200: 4470, rsi: 60)
+      fenced = <<~JSON
+        ```json
+        {"action":"WAIT","confidence":0,"timeframe":"H4","reason":"Range bound"}
+        ```
+      JSON
+      chat_client = openai_chat_client(content: fenced)
+
+      trade_signal = service_for(snapshot, chat_client: chat_client).call
+
+      expect(trade_signal.action).to eq("WAIT")
+      expect(trade_signal.reason).to eq("Range bound")
     end
   end
 
   describe "#market_summary" do
-    it "uses MarketSummaryService for the latest XAUUSD snapshot" do
-      create_snapshot(ema50: 4490, ema200: 4470, rsi: 60, price: 4500)
+    it "loads the latest 10 XAUUSD snapshots through MarketSummaryService" do
+      snapshot = create_snapshot(ema50: 4490, ema200: 4470, rsi: 60, price: 4500)
 
-      summary = described_class.new.market_summary
+      summary = service_for(snapshot, chat_client: openai_json_response(action: "WAIT", confidence: 0, reason: "x")).market_summary
 
       expect(summary[:symbol]).to eq("XAUUSD")
       expect(summary[:current_price]).to eq(4500)
-      expect(summary[:current_rsi]).to eq(60)
-      expect(summary[:trend]).to eq("bullish")
       expect(summary[:snapshot_count]).to eq(1)
+      expect(summary[:timeframe]).to eq("H4")
+      expect(summary[:ema50_trend]).to be_present
     end
   end
 end

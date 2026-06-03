@@ -10,10 +10,17 @@ input int    RsiPeriod              = 14;
 input int    EmaFastPeriod          = 50;
 input int    EmaSlowPeriod          = 200;
 input int    SupportResistanceBars  = 20;
+input double LotSize                = 0.01;
+input int    Slippage               = 3;
+input int    MagicNumber            = 20260603;
+input int    OrderPollSeconds       = 5;     // poll for trigger/close; 0 = disable
 input bool   VerboseLog             = true;
 
-string g_signalsUrl = "";
-string g_apiBase    = "";
+string g_signalsUrl         = "";
+string g_orderUpdatesUrl    = "";
+string g_positionUpdatesUrl = "";
+string g_apiBase            = "";
+datetime g_lastOrderPoll = 0;
 
 void Log(string message)
 {
@@ -34,6 +41,16 @@ string ApiBase()
 string SignalsUrl()
 {
    return ApiBase() + "/api/v1/signals";
+}
+
+string OrderUpdatesUrl()
+{
+   return ApiBase() + "/api/v1/order_updates";
+}
+
+string PositionUpdatesUrl()
+{
+   return ApiBase() + "/api/v1/position_updates";
 }
 
 string ChartTimeframe()
@@ -159,64 +176,469 @@ bool TestApiReachable()
    return httpCode == 200;
 }
 
-int OnInit()
+// --- JSON helpers (flat Rails responses) ---
+
+int JsonKeyPos(string json, string key)
 {
-   if(IntervalSeconds < 1)
+   string patterns[4];
+   patterns[0] = "\"" + key + "\":\"";
+   patterns[1] = "\"" + key + "\": \"";
+   patterns[2] = "\"" + key + "\":";
+   patterns[3] = "\"" + key + "\": ";
+
+   int i;
+   for(i = 0; i < 4; i++)
    {
-      Print("[ShogunX] IntervalSeconds must be >= 1");
-      return(INIT_PARAMETERS_INCORRECT);
+      int pos = StringFind(json, patterns[i]);
+      if(pos >= 0)
+         return pos + StringLen(patterns[i]);
    }
-
-   if(ApiPort != 80 && ApiPort != 443)
-   {
-      Print("[ShogunX] ApiPort must be 80 or 443 for WebRequest. Use make upd (port 80).");
-      return(INIT_PARAMETERS_INCORRECT);
-   }
-
-   if(SupportResistanceBars < 2)
-   {
-      Print("[ShogunX] SupportResistanceBars must be >= 2");
-      return(INIT_PARAMETERS_INCORRECT);
-   }
-
-   g_apiBase = ApiBase();
-   g_signalsUrl = SignalsUrl();
-
-   Log("EA started on " + Symbol() + " " + ChartTimeframe()
-       + " — snapshot every " + IntegerToString(IntervalSeconds) + "s ("
-       + DoubleToString(IntervalSeconds / 3600.0, 2) + "h)");
-   Log("Whitelist in MT4 (no port): " + g_apiBase);
-   Log("Signals URL: " + g_signalsUrl);
-
-   if(!TestApiReachable())
-   {
-      MessageBox(
-         "Cannot reach ShogunX API.\n\n"
-         "MT4 cannot use port 3000 — only 80/443.\n\n"
-         "1) On Mac: make upd  (exposes port 80)\n"
-         "2) Tools -> Options -> Expert Advisors\n"
-         "   Add: " + g_apiBase + "\n"
-         "3) Restart MT4, ApiPort=80, re-attach EA\n"
-         "4) VM? Set ApiHost to Mac IP (make mt4-host)",
-         "ShogunX WebRequest",
-         MB_ICONWARNING
-      );
-   }
-
-   EventSetTimer(IntervalSeconds);
-   SendSignal();
-   return(INIT_SUCCEEDED);
+   return -1;
 }
 
-void OnDeinit(const int reason)
+string JsonExtractString(string json, string key)
 {
-   EventKillTimer();
-   Log("EA stopped.");
+   int start = JsonKeyPos(json, key);
+   if(start < 0)
+      return "";
+
+   ushort first = StringGetCharacter(json, start);
+   if(first == '"')
+   {
+      start++;
+      int end = StringFind(json, "\"", start);
+      if(end < 0)
+         return "";
+      return StringSubstr(json, start, end - start);
+   }
+
+   int end = start;
+   int len = StringLen(json);
+   while(end < len)
+   {
+      ushort c = StringGetCharacter(json, end);
+      if(c == ',' || c == '}' || c == ']' || c == ' ')
+         break;
+      end++;
+   }
+   return StringSubstr(json, start, end - start);
 }
 
-void OnTimer()
+double JsonExtractNumber(string json, string key)
 {
-   SendSignal();
+   string raw = JsonExtractString(json, key);
+   if(StringLen(raw) == 0)
+      return 0.0;
+   return StringToDouble(raw);
+}
+
+int JsonExtractInt(string json, string key)
+{
+   return (int)JsonExtractNumber(json, key);
+}
+
+string OrderComment(int orderId)
+{
+   return "ShogunX#" + IntegerToString(orderId);
+}
+
+string ExecutedGlobalKey(int orderId)
+{
+   return "ShogunX_ord_" + IntegerToString(orderId);
+}
+
+bool OrderAlreadyExecuted(int orderId)
+{
+   if(orderId <= 0)
+      return true;
+
+   if(GlobalVariableCheck(ExecutedGlobalKey(orderId)))
+      return true;
+
+   int total = OrdersTotal();
+   int i;
+   for(i = 0; i < total; i++)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+         continue;
+
+      if(OrderMagicNumber() != MagicNumber)
+         continue;
+
+      if(StringFind(OrderComment(), OrderComment(orderId)) >= 0)
+         return true;
+   }
+
+   return false;
+}
+
+void MarkOrderExecuted(int orderId)
+{
+   GlobalVariableSet(ExecutedGlobalKey(orderId), (double)TimeCurrent());
+}
+
+string TriggeredGlobalKey(int orderId)
+{
+   return "ShogunX_trig_" + IntegerToString(orderId);
+}
+
+string OpenGlobalKey(int orderId)
+{
+   return "ShogunX_open_" + IntegerToString(orderId);
+}
+
+string ClosedGlobalKey(int orderId)
+{
+   return "ShogunX_cls_" + IntegerToString(orderId);
+}
+
+bool TriggeredAlreadyReported(int orderId)
+{
+   return GlobalVariableCheck(TriggeredGlobalKey(orderId));
+}
+
+bool OpenAlreadyReported(int orderId)
+{
+   return GlobalVariableCheck(OpenGlobalKey(orderId));
+}
+
+bool ClosedAlreadyReported(int orderId)
+{
+   return GlobalVariableCheck(ClosedGlobalKey(orderId));
+}
+
+void MarkTriggeredReported(int orderId)
+{
+   GlobalVariableSet(TriggeredGlobalKey(orderId), (double)TimeCurrent());
+}
+
+void MarkOpenReported(int orderId)
+{
+   GlobalVariableSet(OpenGlobalKey(orderId), (double)TimeCurrent());
+}
+
+void MarkClosedReported(int orderId)
+{
+   GlobalVariableSet(ClosedGlobalKey(orderId), (double)TimeCurrent());
+}
+
+int ParseOrderIdFromComment(string comment)
+{
+   string prefix = "ShogunX#";
+   int pos = StringFind(comment, prefix);
+   if(pos < 0)
+      return 0;
+
+   return (int)StringToInteger(StringSubstr(comment, pos + StringLen(prefix)));
+}
+
+bool IsMarketOrderType(int orderType)
+{
+   return orderType == OP_BUY || orderType == OP_SELL;
+}
+
+bool IsPendingOrderType(int orderType)
+{
+   return orderType == OP_BUYLIMIT || orderType == OP_SELLLIMIT
+       || orderType == OP_BUYSTOP || orderType == OP_SELLSTOP;
+}
+
+double OrderNetProfit()
+{
+   return OrderProfit() + OrderSwap() + OrderCommission();
+}
+
+bool NormalizeTradeSymbol(string symbolFromApi, string &tradeSymbol)
+{
+   if(StringLen(symbolFromApi) == 0)
+   {
+      tradeSymbol = Symbol();
+      return true;
+   }
+
+   tradeSymbol = symbolFromApi;
+   if(SymbolSelect(tradeSymbol, true))
+      return true;
+
+   Log("Symbol not available in Market Watch: " + tradeSymbol + " — using chart symbol " + Symbol());
+   tradeSymbol = Symbol();
+   return true;
+}
+
+bool PostJsonPayload(string url, string payload, string logLabel, int orderId)
+{
+   string body;
+   int httpCode;
+
+   Log(logLabel + " POST " + url);
+   Log("Payload: " + payload);
+
+   if(!WebPostJson(url, payload, body, httpCode))
+   {
+      LogWebRequestError(GetLastError());
+      return false;
+   }
+
+   Log(logLabel + " HTTP " + IntegerToString(httpCode) + " response=" + body);
+
+   if(httpCode < 200 || httpCode >= 300)
+   {
+      Log(logLabel + " failed for order_id=" + IntegerToString(orderId));
+      return false;
+   }
+
+   return true;
+}
+
+bool PostOrderStatusUpdate(int orderId, int ticket, string status)
+{
+   string payload = StringFormat(
+      "{\"order_id\":%d,\"ticket\":%d,\"status\":\"%s\"}",
+      orderId,
+      ticket,
+      status
+   );
+   return PostJsonPayload(g_orderUpdatesUrl, payload, "Order update", orderId);
+}
+
+bool PostPositionOpenUpdate(int orderId, int ticket, double entryPrice)
+{
+   string payload = StringFormat(
+      "{\"order_id\":%d,\"ticket\":%d,\"status\":\"open\",\"entry_price\":%s}",
+      orderId,
+      ticket,
+      PriceJson(entryPrice)
+   );
+   return PostJsonPayload(g_positionUpdatesUrl, payload, "Position update (open)", orderId);
+}
+
+bool PostPositionClosedUpdate(int orderId, int ticket, double profitLoss)
+{
+   string payload = StringFormat(
+      "{\"order_id\":%d,\"ticket\":%d,\"status\":\"closed\",\"profit_loss\":%s}",
+      orderId,
+      ticket,
+      PriceJson(profitLoss)
+   );
+   return PostJsonPayload(g_positionUpdatesUrl, payload, "Position update (closed)", orderId);
+}
+
+void CheckTriggeredOrder(int orderId, int ticket, int orderType)
+{
+   if(!IsMarketOrderType(orderType))
+      return;
+
+   if(TriggeredAlreadyReported(orderId))
+      return;
+
+   Log("Pending order triggered order_id=" + IntegerToString(orderId)
+       + " ticket=" + IntegerToString(ticket));
+
+   if(PostOrderStatusUpdate(orderId, ticket, "triggered"))
+      MarkTriggeredReported(orderId);
+}
+
+void CheckOpenPosition(int orderId, int ticket, int orderType)
+{
+   if(!IsMarketOrderType(orderType))
+      return;
+
+   if(!TriggeredAlreadyReported(orderId))
+      return;
+
+   if(OpenAlreadyReported(orderId))
+      return;
+
+   double entryPrice = OrderOpenPrice();
+
+   Log("Position open order_id=" + IntegerToString(orderId)
+       + " ticket=" + IntegerToString(ticket)
+       + " entry_price=" + PriceJson(entryPrice));
+
+   if(PostPositionOpenUpdate(orderId, ticket, entryPrice))
+      MarkOpenReported(orderId);
+}
+
+void CheckClosedOrder(int orderId, int ticket)
+{
+   if(ClosedAlreadyReported(orderId))
+      return;
+
+   if(!OrderSelect(ticket, SELECT_BY_TICKET, MODE_HISTORY))
+      return;
+
+   if(OrderCloseTime() <= 0)
+      return;
+
+   double profitLoss = OrderNetProfit();
+
+   Log("Trade closed order_id=" + IntegerToString(orderId)
+       + " ticket=" + IntegerToString(ticket)
+       + " profit_loss=" + PriceJson(profitLoss));
+
+   if(PostPositionClosedUpdate(orderId, ticket, profitLoss))
+      MarkClosedReported(orderId);
+}
+
+void PollShogunXOrderLifecycle()
+{
+   int i;
+   int total;
+
+   total = OrdersTotal();
+   for(i = 0; i < total; i++)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+         continue;
+
+      if(OrderMagicNumber() != MagicNumber)
+         continue;
+
+      int orderId = ParseOrderIdFromComment(OrderComment());
+      if(orderId <= 0)
+         continue;
+
+      int ticket = OrderTicket();
+      int orderType = OrderType();
+
+      if(IsPendingOrderType(orderType))
+         continue;
+
+      CheckTriggeredOrder(orderId, ticket, orderType);
+      CheckOpenPosition(orderId, ticket, orderType);
+   }
+
+   total = OrdersHistoryTotal();
+   for(i = total - 1; i >= 0; i--)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY))
+         continue;
+
+      if(OrderMagicNumber() != MagicNumber)
+         continue;
+
+      int orderId = ParseOrderIdFromComment(OrderComment());
+      if(orderId <= 0)
+         continue;
+
+      CheckClosedOrder(orderId, OrderTicket());
+   }
+}
+
+int SendPendingOrder(string tradeSymbol, int cmd, double lots, double price, double sl, double tp, string comment, int orderId)
+{
+   ResetLastError();
+   int ticket = OrderSend(tradeSymbol, cmd, lots, price, Slippage, sl, tp, comment, MagicNumber, 0, clrNONE);
+
+   if(ticket < 0)
+   {
+      Log("OrderSend failed cmd=" + IntegerToString(cmd)
+          + " symbol=" + tradeSymbol
+          + " price=" + DoubleToString(price, Digits)
+          + " err=" + IntegerToString(GetLastError()));
+      return -1;
+   }
+
+   Log("OrderSend OK ticket=" + IntegerToString(ticket)
+       + " cmd=" + IntegerToString(cmd)
+       + " symbol=" + tradeSymbol
+       + " price=" + DoubleToString(price, Digits)
+       + " sl=" + DoubleToString(sl, Digits)
+       + " tp=" + DoubleToString(tp, Digits)
+       + " comment=" + comment);
+
+   if(!PostOrderStatusUpdate(orderId, ticket, "placed"))
+      Log("WARNING: MT4 order placed but Rails order_updates callback failed for order_id="
+          + IntegerToString(orderId));
+
+   return ticket;
+}
+
+bool PlaceBuyLimit(string tradeSymbol, double lots, double entryPrice, double stopLoss, double takeProfit, int orderId)
+{
+   Log("PlaceBuyLimit order_id=" + IntegerToString(orderId)
+       + " entry=" + DoubleToString(entryPrice, Digits));
+   return SendPendingOrder(tradeSymbol, OP_BUYLIMIT, lots, entryPrice, stopLoss, takeProfit, OrderComment(orderId), orderId) >= 0;
+}
+
+bool PlaceSellLimit(string tradeSymbol, double lots, double entryPrice, double stopLoss, double takeProfit, int orderId)
+{
+   Log("PlaceSellLimit order_id=" + IntegerToString(orderId)
+       + " entry=" + DoubleToString(entryPrice, Digits));
+   return SendPendingOrder(tradeSymbol, OP_SELLLIMIT, lots, entryPrice, stopLoss, takeProfit, OrderComment(orderId), orderId) >= 0;
+}
+
+bool PlaceBuyStop(string tradeSymbol, double lots, double entryPrice, double stopLoss, double takeProfit, int orderId)
+{
+   Log("PlaceBuyStop order_id=" + IntegerToString(orderId)
+       + " entry=" + DoubleToString(entryPrice, Digits));
+   return SendPendingOrder(tradeSymbol, OP_BUYSTOP, lots, entryPrice, stopLoss, takeProfit, OrderComment(orderId), orderId) >= 0;
+}
+
+bool PlaceSellStop(string tradeSymbol, double lots, double entryPrice, double stopLoss, double takeProfit, int orderId)
+{
+   Log("PlaceSellStop order_id=" + IntegerToString(orderId)
+       + " entry=" + DoubleToString(entryPrice, Digits));
+   return SendPendingOrder(tradeSymbol, OP_SELLSTOP, lots, entryPrice, stopLoss, takeProfit, OrderComment(orderId), orderId) >= 0;
+}
+
+void ProcessExecutionResponse(string body)
+{
+   string action = JsonExtractString(body, "action");
+   StringToUpper(action);
+
+   if(StringLen(action) == 0)
+   {
+      Log("Response missing action — no trade placed.");
+      return;
+   }
+
+   if(action == "HOLD")
+   {
+      string reason = JsonExtractString(body, "reason");
+      Log("HOLD — no trade placed. reason=" + reason);
+      return;
+   }
+
+   int orderId = JsonExtractInt(body, "order_id");
+   if(OrderAlreadyExecuted(orderId))
+   {
+      Log("Skipping duplicate execution for order_id=" + IntegerToString(orderId));
+      return;
+   }
+
+   string symbolFromApi = JsonExtractString(body, "symbol");
+   string tradeSymbol;
+   NormalizeTradeSymbol(symbolFromApi, tradeSymbol);
+
+   double entryPrice = JsonExtractNumber(body, "entry_price");
+   double stopLoss = JsonExtractNumber(body, "stop_loss");
+   double takeProfit = JsonExtractNumber(body, "take_profit");
+
+   if(entryPrice <= 0.0)
+   {
+      Log("Invalid entry_price for order_id=" + IntegerToString(orderId));
+      return;
+   }
+
+   bool placed = false;
+
+   if(action == "BUY_LIMIT")
+      placed = PlaceBuyLimit(tradeSymbol, LotSize, entryPrice, stopLoss, takeProfit, orderId);
+   else if(action == "SELL_LIMIT")
+      placed = PlaceSellLimit(tradeSymbol, LotSize, entryPrice, stopLoss, takeProfit, orderId);
+   else if(action == "BUY_STOP")
+      placed = PlaceBuyStop(tradeSymbol, LotSize, entryPrice, stopLoss, takeProfit, orderId);
+   else if(action == "SELL_STOP")
+      placed = PlaceSellStop(tradeSymbol, LotSize, entryPrice, stopLoss, takeProfit, orderId);
+   else
+   {
+      Log("Unsupported action: " + action);
+      return;
+   }
+
+   if(placed)
+      MarkOrderExecuted(orderId);
 }
 
 void SendSignal()
@@ -253,4 +675,93 @@ void SendSignal()
    }
 
    Log("HTTP " + IntegerToString(httpCode) + " OK. Response: " + body);
+
+   if(httpCode >= 200 && httpCode < 300)
+      ProcessExecutionResponse(body);
+   else
+      Log("Non-success HTTP code — skipping execution.");
+}
+
+int OnInit()
+{
+   if(IntervalSeconds < 1)
+   {
+      Print("[ShogunX] IntervalSeconds must be >= 1");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+
+   if(ApiPort != 80 && ApiPort != 443)
+   {
+      Print("[ShogunX] ApiPort must be 80 or 443 for WebRequest. Use make upd (port 80).");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+
+   if(SupportResistanceBars < 2)
+   {
+      Print("[ShogunX] SupportResistanceBars must be >= 2");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+
+   if(LotSize <= 0.0)
+   {
+      Print("[ShogunX] LotSize must be > 0");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+
+   g_apiBase = ApiBase();
+   g_signalsUrl = SignalsUrl();
+   g_orderUpdatesUrl = OrderUpdatesUrl();
+   g_positionUpdatesUrl = PositionUpdatesUrl();
+
+   Log("EA started on " + Symbol() + " " + ChartTimeframe()
+       + " — snapshot every " + IntegerToString(IntervalSeconds) + "s ("
+       + DoubleToString(IntervalSeconds / 3600.0, 2) + "h)");
+   Log("Whitelist in MT4 (no port): " + g_apiBase);
+   Log("Signals URL: " + g_signalsUrl);
+   Log("Order updates URL: " + g_orderUpdatesUrl);
+   Log("Position updates URL: " + g_positionUpdatesUrl);
+   Log("LotSize=" + DoubleToString(LotSize, 2) + " MagicNumber=" + IntegerToString(MagicNumber));
+   Log("OrderPollSeconds=" + IntegerToString(OrderPollSeconds));
+
+   if(!TestApiReachable())
+   {
+      MessageBox(
+         "Cannot reach ShogunX API.\n\n"
+         "MT4 cannot use port 3000 — only 80/443.\n\n"
+         "1) On Mac: make upd  (exposes port 80)\n"
+         "2) Tools -> Options -> Expert Advisors\n"
+         "   Add: " + g_apiBase + "\n"
+         "3) Restart MT4, ApiPort=80, re-attach EA\n"
+         "4) VM? Set ApiHost to Mac IP (make mt4-host)",
+         "ShogunX WebRequest",
+         MB_ICONWARNING
+      );
+   }
+
+   EventSetTimer(IntervalSeconds);
+   SendSignal();
+   return(INIT_SUCCEEDED);
+}
+
+void OnDeinit(const int reason)
+{
+   EventKillTimer();
+   Log("EA stopped.");
+}
+
+void OnTimer()
+{
+   SendSignal();
+}
+
+void OnTick()
+{
+   if(OrderPollSeconds <= 0)
+      return;
+
+   if(g_lastOrderPoll > 0 && (TimeCurrent() - g_lastOrderPoll) < OrderPollSeconds)
+      return;
+
+   g_lastOrderPoll = TimeCurrent();
+   PollShogunXOrderLifecycle();
 }

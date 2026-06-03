@@ -1,18 +1,12 @@
 module Api
   module V1
-    class SignalsController < ApplicationController
-      # MT4 posts flat JSON; do not wrap params under :signal (resources :signals name).
-      wrap_parameters false
-
+    class SignalsController < BaseController
       def create
         snapshot = MarketSnapshot.new(snapshot_params)
 
         if snapshot.save
-          render json: {
-            status: "received",
-            snapshot_id: snapshot.id,
-            action: "WAIT"
-          }
+          result = EndToEndSignalPipelineService.new(snapshot).call
+          render json: result
         else
           render json: {
             status: "error",
