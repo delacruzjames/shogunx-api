@@ -3,12 +3,14 @@
 // MT4 WebRequest ONLY allows http port 80 and https port 443 — no :3000 in URLs.
 // Run API with: make upd (maps host port 80 -> container 3000).
 // Whitelist in MT4: http://127.0.0.1  (or http://YOUR_MAC_IP if MT4 is in a VM).
-input string ApiHost         = "127.0.0.1";
-input int    ApiPort         = 80;    // must be 80 (http) or 443 (https)
-input int    IntervalSeconds = 3;
-input double SlOffset        = 0.0030;
-input double TpOffset        = 0.0060;
-input bool   VerboseLog      = true;
+input string ApiHost                = "127.0.0.1";
+input int    ApiPort                = 80;    // must be 80 (http) or 443 (https)
+input int    IntervalSeconds        = 14400;  // 4 hours (4 * 60 * 60)
+input int    RsiPeriod              = 14;
+input int    EmaFastPeriod          = 50;
+input int    EmaSlowPeriod          = 200;
+input int    SupportResistanceBars  = 20;
+input bool   VerboseLog             = true;
 
 string g_signalsUrl = "";
 string g_apiBase    = "";
@@ -32,6 +34,58 @@ string ApiBase()
 string SignalsUrl()
 {
    return ApiBase() + "/api/v1/signals";
+}
+
+string ChartTimeframe()
+{
+   switch(Period())
+   {
+      case PERIOD_M1:  return "M1";
+      case PERIOD_M5:  return "M5";
+      case PERIOD_M15: return "M15";
+      case PERIOD_M30: return "M30";
+      case PERIOD_H1:  return "H1";
+      case PERIOD_H4:  return "H4";
+      case PERIOD_D1:  return "D1";
+      case PERIOD_W1:  return "W1";
+      case PERIOD_MN1: return "MN1";
+      default:         return IntegerToString(Period());
+   }
+}
+
+double RecentLow(int bars)
+{
+   double lowest = iLow(Symbol(), Period(), 0);
+   int i;
+
+   for(i = 1; i < bars; i++)
+   {
+      double value = iLow(Symbol(), Period(), i);
+      if(value < lowest)
+         lowest = value;
+   }
+
+   return lowest;
+}
+
+double RecentHigh(int bars)
+{
+   double highest = iHigh(Symbol(), Period(), 0);
+   int i;
+
+   for(i = 1; i < bars; i++)
+   {
+      double value = iHigh(Symbol(), Period(), i);
+      if(value > highest)
+         highest = value;
+   }
+
+   return highest;
+}
+
+string PriceJson(double value)
+{
+   return DoubleToString(value, Digits);
 }
 
 bool WebGet(string url, string &body, int &httpCode)
@@ -58,7 +112,7 @@ bool WebPostJson(string url, const string payload, string &body, int &httpCode)
       ArrayResize(post, len - 1);
 
    char result[];
-   string reqHeaders = "Content-Type: application/json\r\n";
+   string reqHeaders = "Content-Type: application/json\r\nAccept: application/json\r\n";
    string response_headers;
 
    ResetLastError();
@@ -119,10 +173,18 @@ int OnInit()
       return(INIT_PARAMETERS_INCORRECT);
    }
 
+   if(SupportResistanceBars < 2)
+   {
+      Print("[ShogunX] SupportResistanceBars must be >= 2");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+
    g_apiBase = ApiBase();
    g_signalsUrl = SignalsUrl();
 
-   Log("EA started on " + Symbol());
+   Log("EA started on " + Symbol() + " " + ChartTimeframe()
+       + " — snapshot every " + IntegerToString(IntervalSeconds) + "s ("
+       + DoubleToString(IntervalSeconds / 3600.0, 2) + "h)");
    Log("Whitelist in MT4 (no port): " + g_apiBase);
    Log("Signals URL: " + g_signalsUrl);
 
@@ -159,14 +221,23 @@ void OnTimer()
 
 void SendSignal()
 {
-   double bid = Bid;
+   double price = Bid;
+   double rsi = iRSI(Symbol(), Period(), RsiPeriod, PRICE_CLOSE, 0);
+   double ema50 = iMA(Symbol(), Period(), EmaFastPeriod, 0, MODE_EMA, PRICE_CLOSE, 0);
+   double ema200 = iMA(Symbol(), Period(), EmaSlowPeriod, 0, MODE_EMA, PRICE_CLOSE, 0);
+   double support = RecentLow(SupportResistanceBars);
+   double resistance = RecentHigh(SupportResistanceBars);
 
    string payload = StringFormat(
-      "{\"symbol\":\"%s\",\"entry\":%.5f,\"sl\":%.5f,\"tp\":%.5f}",
+      "{\"symbol\":\"%s\",\"timeframe\":\"%s\",\"price\":%s,\"rsi\":%s,\"ema50\":%s,\"ema200\":%s,\"support\":%s,\"resistance\":%s}",
       Symbol(),
-      bid,
-      bid - SlOffset,
-      bid + TpOffset
+      ChartTimeframe(),
+      PriceJson(price),
+      PriceJson(rsi),
+      PriceJson(ema50),
+      PriceJson(ema200),
+      PriceJson(support),
+      PriceJson(resistance)
    );
 
    string body;

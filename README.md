@@ -2,6 +2,22 @@
 
 ShogunX is our AI-powered trading bot. It runs on **MetaTrader 4 (MT4)** via an Expert Advisor (EA) for fast tick-to-API response, and connects to this Rails API backend for decision-making, risk checks, and order responses.
 
+## ShogunX directions
+
+**OpenAI suggests.**  
+**Rails approves.**  
+**MT4 executes.**  
+**Rails records everything.**
+
+| Principle | Meaning |
+|-----------|---------|
+| OpenAI suggests | The Brain proposes a trade (direction, size, stops) from market context. It does not place orders or bypass checks. |
+| Rails approves | The API runs auth, risk limits, and policy. Only an approved (or explicit hold/reject) response goes back to the EA. |
+| MT4 executes | The EA sends signals and, when told to, places trades on the broker terminal. No AI or Rails code runs inside MT4. |
+| Rails records everything | Signals, proposals, approvals, rejections, and execution outcomes are persisted and auditable in this backend. |
+
+Nothing trades on the broker until Rails approves it. Nothing is forgotten on the server side.
+
 ## Broker account (FBS)
 
 Log in through **MT4 only** — the EA does not store broker login or password. ShogunX talks to your Rails API; MT4 talks to FBS when placing trades.
@@ -29,25 +45,29 @@ Source: [`mt4/ShogunX.mq4`](mt4/ShogunX.mq4)
 
    **MT4 on Windows/VM, API on Mac:** set **ApiHost** to your Mac LAN IP (`make mt4-host`), whitelist `http://192.168.x.x`, keep **ApiPort** `80`.
 
-7. Set **IntervalSeconds** (default **3** for testing; use **300** for 5m or **14400** for 4h production) to control how often the EA POSTs to the API.
+7. **IntervalSeconds** defaults to **14400** (4 hours). Use **3** for local testing only.
 
 ### EA behavior
 
-- Calls the API once when attached, then every **IntervalSeconds** (default **3** seconds) via an MT4 timer (works even when ticks are sparse).
-- **POST**s JSON to `RailsUrl`:
+- Calls the API once when attached, then every **IntervalSeconds** (default **4 hours**) via an MT4 timer (works even when ticks are sparse).
+- **POST**s a market snapshot JSON (fields match `MarketSnapshot` on Rails):
 
   ```json
   {
     "symbol": "EURUSD",
-    "entry": 1.08500,
-    "sl": 1.08200,
-    "tp": 1.09100
+    "timeframe": "H1",
+    "price": 1.08500,
+    "rsi": 55.25,
+    "ema50": 1.08400,
+    "ema200": 1.08200,
+    "support": 1.08000,
+    "resistance": 1.09000
   }
   ```
 
-  `entry` is the chart **Bid**; `sl` / `tp` use **SlOffset** / **TpOffset** inputs (defaults ±0.0030 / +0.0060).
+  `timeframe` is the chart period; `price` is **Bid**; `rsi` / `ema50` / `ema200` from built-in indicators; `support` / `resistance` are the lowest low and highest high over **SupportResistanceBars** (default 20).
 
-- Logs HTTP status and the Rails JSON response in the **Experts** tab. Order execution from the response will be added once the full pipeline returns approved orders.
+- Logs HTTP status and the Rails JSON response (`status`, `snapshot_id`, `action`) in the **Experts** tab. Order execution from the response will be added once the full pipeline returns approved orders.
 
 ### Connect to local API
 
@@ -60,43 +80,49 @@ With the EA on a chart and WebRequest allowed, you should see `Rails Response: {
 
 ## Architecture
 
+Flow matches [ShogunX directions](#shogunx-directions): suggest → approve → execute → record.
+
 ```
-MT4 EA (installed on MT4)
-  ↓
-ShogunX Rails API
-  ↓
-OpenAI Brain
-  ↓
-Risk Manager
-  ↓
-Order Execution Response
-  ↓
-MT4 executes trade
+MT4 EA  →  POST signal
+              ↓
+         ShogunX Rails API  →  record signal
+              ↓
+         OpenAI Brain  →  suggestion (record proposal)
+              ↓
+         Risk / policy  →  approve or reject (record decision)
+              ↓
+         JSON order response  →  record outcome sent to EA
+              ↓
+         MT4 EA  →  execute on broker (if approved)
 ```
 
 | Step | Component | Role |
 |------|-----------|------|
-| 1 | **MT4 EA** | ShogunX client (`mt4/ShogunX.mq4`) installed on MT4. POSTs signals every **IntervalSeconds** (default 3s testing). |
-| 2 | **ShogunX Rails API** | Backend for the trading bot. Authenticates the EA, orchestrates the pipeline, and returns a structured response. |
-| 3 | **OpenAI Brain** | Evaluates the incoming context and proposes a trade action (direction, size, stops, etc.). |
-| 4 | **Risk Manager** | Validates the proposal against account limits, exposure rules, and safety constraints before anything is sent back. |
-| 5 | **Order Execution Response** | JSON payload returned to the EA with the approved (or rejected) order details. |
-| 6 | **MT4** | Executes the approved trade on the broker terminal. |
+| 1 | **MT4 EA** | Client on MT4. POSTs snapshots every **IntervalSeconds** (default 4h). Executes only approved orders. |
+| 2 | **ShogunX Rails API** | Orchestrates the pipeline, approves or rejects, **records everything**, returns structured JSON to the EA. |
+| 3 | **OpenAI Brain** | **Suggests** a trade action from context. Does not approve or execute. |
+| 4 | **Risk Manager** | Part of Rails approval: limits, exposure, safety before any order is returned. |
+| 5 | **Order response** | Approved, hold, or rejected payload for the EA. |
+| 6 | **MT4** | **Executes** approved trades on the broker terminal. |
 
 ```mermaid
 sequenceDiagram
-    participant EA as MT4 EA (on MT4)
+    participant EA as MT4 EA
     participant API as ShogunX Rails API
     participant AI as OpenAI Brain
     participant Risk as Risk Manager
 
-    EA->>API: Market context + trade request
+    EA->>API: Signal (market context)
+    API->>API: Record signal
     API->>AI: Structured prompt
-    AI-->>API: Proposed trade action
-    API->>Risk: Validate proposal
-    Risk-->>API: Approved / rejected order
-    API-->>EA: Order execution response
-    EA->>EA: Execute trade on MT4
+    AI-->>API: Suggestion
+    API->>API: Record proposal
+    API->>Risk: Approve?
+    Risk-->>API: Approved / rejected
+    API->>API: Record decision
+    API-->>EA: Order response
+    EA->>EA: Execute if approved
+    API->>API: Record execution result
 ```
 
 ## Backend development
