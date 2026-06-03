@@ -13,6 +13,9 @@
 # Ignore all logfiles and tempfiles.
 /log/*
 /tmp/*
+
+# RSpec persisted example status (local only)
+/spec/examples.txt
 !/log/.keep
 !/tmp/.keep
 

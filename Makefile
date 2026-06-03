@@ -5,11 +5,14 @@ APP_URL := http://localhost:$(APP_PORT)
 
 export RAILS_MASTER_KEY ?= $(shell cat config/master.key 2>/dev/null)
 
-.PHONY: help build up down restart logs ps status shell console db-setup db-migrate db-reset test clean
+SPEC ?=
+
+.PHONY: help build bundle up down restart logs ps status shell console db-setup db-migrate db-reset rubocop rspec test ci clean
 
 help:
 	@echo "Development commands (Docker):"
 	@echo "  make build       Build the development image"
+	@echo "  make bundle      Install gems in Docker (run after Gemfile changes)"
 	@echo "  make up          Start db + web in the foreground"
 	@echo "  make upd         Start db + web in the background"
 	@echo "  make down        Stop and remove containers"
@@ -22,13 +25,19 @@ help:
 	@echo "  make db-setup    Prepare the development database"
 	@echo "  make db-migrate  Run pending migrations"
 	@echo "  make db-reset    Reset the development database"
-	@echo "  make test        Run the test suite"
+	@echo "  make rubocop     Run RuboCop"
+	@echo "  make rspec       Run RSpec (optional: SPEC=path/to/spec.rb)"
+	@echo "  make ci          Run rubocop + rspec"
+	@echo "  make test        Alias for make rspec"
 	@echo "  make clean       Remove containers, volumes, and images"
 	@echo ""
 	@echo "Optional env vars: APP_PORT (default 3000), DB_PORT (default 5433)"
 
 build:
 	$(COMPOSE) build
+
+bundle:
+	$(COMPOSE) run --rm $(SERVICE) bundle install
 
 up:
 	APP_PORT=$(APP_PORT) $(COMPOSE) up
@@ -68,7 +77,11 @@ console:
 	$(COMPOSE) run --rm $(SERVICE) bin/rails console
 
 db-setup:
-	$(COMPOSE) run --rm $(SERVICE) bin/rails db:prepare
+	$(COMPOSE) run --rm $(SERVICE) bash -c "bundle check || bundle install; bin/rails db:prepare"
+	$(COMPOSE) run --rm \
+		-e RAILS_ENV=test \
+		-e DATABASE_URL=postgres://postgres:postgres@db:5432/shogunx_api_test \
+		$(SERVICE) bash -c "bundle check || bundle install; bin/rails db:test:prepare"
 
 db-migrate:
 	$(COMPOSE) run --rm $(SERVICE) bin/rails db:migrate
@@ -76,11 +89,18 @@ db-migrate:
 db-reset:
 	$(COMPOSE) run --rm $(SERVICE) bin/rails db:reset
 
-test:
+rubocop:
+	$(COMPOSE) run --rm $(SERVICE) bash -c "bundle check || bundle install; bundle exec rubocop"
+
+rspec:
 	$(COMPOSE) run --rm \
 		-e RAILS_ENV=test \
 		-e DATABASE_URL=postgres://postgres:postgres@db:5432/shogunx_api_test \
-		$(SERVICE) bin/rails test
+		$(SERVICE) bash -c "bundle check || bundle install; bin/rails db:test:prepare && bundle exec rspec $(SPEC)"
+
+test: rspec
+
+ci: rubocop rspec
 
 clean:
 	$(COMPOSE) down -v --rmi local

@@ -36,6 +36,8 @@ gem "image_processing", "~> 1.2"
 # gem "rack-cors"
 
 group :development, :test do
+  gem "rspec-rails", "~> 7.1"
+
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
   gem "debug", platforms: %i[ mri windows ], require: "debug/prelude"
 
@@ -45,6 +47,8 @@ group :development, :test do
   # Static analysis for security vulnerabilities [https://brakemanscanner.org/]
   gem "brakeman", require: false
 
-  # Omakase Ruby styling [https://github.com/rails/rubocop-rails-omakase/]
+  # RuboCop + Rails Omakase style [https://github.com/rails/rubocop-rails-omakase/]
+  gem "rubocop", require: false
+  gem "rubocop-rails", require: false
   gem "rubocop-rails-omakase", require: false
 end
