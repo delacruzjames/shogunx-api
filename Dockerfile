@@ -5,10 +5,10 @@
 # docker build -t shogunx_api .
 # docker run -d -p 80:80 -e RAILS_MASTER_KEY=<value from config/master.key> --name shogunx_api shogunx_api
 
-# For a containerized dev environment, see Dev Containers: https://guides.rubyonrails.org/getting_started_with_devcontainer.html
+# For local development, use Dockerfile.dev with docker-compose.dev.yml or `make up`.
 
 # Make sure RUBY_VERSION matches the Ruby version in .ruby-version
-ARG RUBY_VERSION=3.3.0
+ARG RUBY_VERSION=3.3.6
 FROM docker.io/library/ruby:$RUBY_VERSION-slim AS base
 
 # Rails app lives here
