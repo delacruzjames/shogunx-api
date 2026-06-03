@@ -1,6 +1,17 @@
 module Api
   module V1
     class PositionsController < BaseController
+      include ListScoped
+
+      def index
+        scope = Position.order(opened_at: :desc)
+        scope = scope.where(status: params[:status]) if params[:status].present?
+        scope = scope.where(symbol: params[:symbol]) if params[:symbol].present?
+
+        positions = scope.limit(list_limit)
+        render json: { data: positions.map { |position| JsonPresenter.position(position) } }
+      end
+
       def create
         result = PositionSyncService.new(position_params).call
 
