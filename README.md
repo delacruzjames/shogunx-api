@@ -23,14 +23,17 @@ Source: [`mt4/ShogunX.mq4`](mt4/ShogunX.mq4)
 2. Compile in MetaEditor (**Compile** or F7) to produce `ShogunX.ex4`.
 3. In MT4, open **Navigator → Expert Advisors** and attach **ShogunX** to a chart.
 4. Enable **AutoTrading** in the MT4 toolbar.
-5. **Tools → Options → Expert Advisors** — enable *Allow WebRequest for listed URL* and add your API base URL (e.g. `http://127.0.0.1:3000` for local dev).
-6. In EA inputs, set **RailsUrl** if the API is not on the default:
+5. **Tools → Options → Expert Advisors** — enable *Allow WebRequest for listed URL* and add **`http://127.0.0.1`** (no `:3000` — MT4 only allows ports **80** / **443**). **Restart MT4** after changing this list.
+6. Run **`make upd`** — exposes the API on host port **80** (mapped to Rails 3000 in Docker). EA inputs: **ApiHost** `127.0.0.1`, **ApiPort** `80`.
+7. Signals URL becomes `http://127.0.0.1/api/v1/signals` (browser/curl on port 3000 still works: `http://localhost:3000`).
 
-   `http://127.0.0.1:3000/api/v1/signals`
+   **MT4 on Windows/VM, API on Mac:** set **ApiHost** to your Mac LAN IP (`make mt4-host`), whitelist `http://192.168.x.x`, keep **ApiPort** `80`.
+
+7. Set **IntervalSeconds** (default **3** for testing; use **300** for 5m or **14400** for 4h production) to control how often the EA POSTs to the API.
 
 ### EA behavior
 
-- Polls on every tick but only calls the API every **IntervalSeconds** (default **5**; set to `1` for fastest MT4 polling).
+- Calls the API once when attached, then every **IntervalSeconds** (default **3** seconds) via an MT4 timer (works even when ticks are sparse).
 - **POST**s JSON to `RailsUrl`:
 
   ```json
@@ -73,7 +76,7 @@ MT4 executes trade
 
 | Step | Component | Role |
 |------|-----------|------|
-| 1 | **MT4 EA** | ShogunX client (`mt4/ShogunX.mq4`) installed on MT4. POSTs signals on a configurable interval. |
+| 1 | **MT4 EA** | ShogunX client (`mt4/ShogunX.mq4`) installed on MT4. POSTs signals every **IntervalSeconds** (default 3s testing). |
 | 2 | **ShogunX Rails API** | Backend for the trading bot. Authenticates the EA, orchestrates the pipeline, and returns a structured response. |
 | 3 | **OpenAI Brain** | Evaluates the incoming context and proposes a trade action (direction, size, stops, etc.). |
 | 4 | **Risk Manager** | Validates the proposal against account limits, exposure rules, and safety constraints before anything is sent back. |
