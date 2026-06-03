@@ -7,7 +7,7 @@ export RAILS_MASTER_KEY ?= $(shell cat config/master.key 2>/dev/null)
 
 SPEC ?=
 
-.PHONY: help build bundle up down restart logs ps status shell console db-setup db-migrate db-reset rubocop rspec test ci clean
+.PHONY: help build bundle up down restart logs ps status mt4-host shell console db-setup db-migrate db-reset rubocop rspec test ci clean
 
 help:
 	@echo "Development commands (Docker):"
@@ -20,6 +20,7 @@ help:
 	@echo "  make logs        Follow web logs"
 	@echo "  make ps          Show running services"
 	@echo "  make status      Check whether the app is reachable"
+	@echo "  make mt4-host    Print LAN URL to use in MT4 when not on 127.0.0.1"
 	@echo "  make shell       Open a bash shell in the web container"
 	@echo "  make console     Open a Rails console"
 	@echo "  make db-setup    Prepare the development database"
@@ -68,6 +69,17 @@ status:
 		echo "App is NOT reachable at $(APP_URL)"; \
 		echo "Try: make down && make upd"; \
 		exit 1; \
+	fi
+
+mt4-host:
+	@ip=$$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null); \
+	if [ -n "$$ip" ]; then \
+		echo "MT4 ApiHost (when MT4 is not on this Mac): $$ip"; \
+		echo "MT4 WebRequest whitelist (port 80 only): http://$$ip"; \
+		echo "Test: curl -s http://$$ip/up"; \
+	else \
+		echo "Could not detect LAN IP. Find it in System Settings -> Network."; \
+		echo "Then set EA ApiHost and whitelist http://YOUR_IP (port 80)"; \
 	fi
 
 shell:
