@@ -27,7 +27,7 @@ RSpec.describe NewsContextService do
       expect(result[:calendar_url]).to eq(NewsContextService::CALENDAR_URL)
     end
 
-    it "reports active blackout during the 30-minute news window" do
+    it "reports active blackout during the 60-minute news window" do
       now = Time.zone.parse("2026-06-03 12:00:00")
       create_event(scheduled_at: now + 20.minutes)
 

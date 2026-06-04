@@ -72,7 +72,7 @@ string ChartTimeframe()
       case PERIOD_D1:  return "D1";
       case PERIOD_W1:  return "W1";
       case PERIOD_MN1: return "MN1";
-      default:         return IntegerToString(Period());
+      default:         return IntegerToString((int)Period());
    }
 }
 
@@ -104,6 +104,55 @@ double RecentHigh(int bars)
    }
 
    return highest;
+}
+
+double RecentLowOnPeriod(int period, int bars)
+{
+   double lowest = iLow(Symbol(), period, 0);
+   int i;
+
+   for(i = 1; i < bars; i++)
+   {
+      double value = iLow(Symbol(), period, i);
+      if(value < lowest)
+         lowest = value;
+   }
+
+   return lowest;
+}
+
+double RecentHighOnPeriod(int period, int bars)
+{
+   double highest = iHigh(Symbol(), period, 0);
+   int i;
+
+   for(i = 1; i < bars; i++)
+   {
+      double value = iHigh(Symbol(), period, i);
+      if(value > highest)
+         highest = value;
+   }
+
+   return highest;
+}
+
+string TimeframeMetricsJson(int period)
+{
+   double price = iClose(Symbol(), period, 0);
+   double rsi = iRSI(Symbol(), period, RsiPeriod, PRICE_CLOSE, 0);
+   double ema50 = iMA(Symbol(), period, EmaFastPeriod, 0, MODE_EMA, PRICE_CLOSE, 0);
+   double ema200 = iMA(Symbol(), period, EmaSlowPeriod, 0, MODE_EMA, PRICE_CLOSE, 0);
+   double support = RecentLowOnPeriod(period, SupportResistanceBars);
+   double resistance = RecentHighOnPeriod(period, SupportResistanceBars);
+
+   return StringConcatenate(
+      "\"price\":", PriceJson(price),
+      ",\"rsi\":", PriceJson(rsi),
+      ",\"ema50\":", PriceJson(ema50),
+      ",\"ema200\":", PriceJson(ema200),
+      ",\"support\":", PriceJson(support),
+      ",\"resistance\":", PriceJson(resistance)
+   );
 }
 
 string PriceJson(double value)
@@ -648,7 +697,6 @@ void ProcessExecutionResponse(string body)
    string action = JsonExtractString(body, "action");
    StringTrimLeft(action);
    StringTrimRight(action);
-   action = StringToUpper(action);
    action = ResolveActionFromBody(body, action);
 
    if(StringLen(action) == 0)
@@ -708,23 +756,12 @@ void ProcessExecutionResponse(string body)
 
 void SendSignal()
 {
-   double price = Bid;
-   double rsi = iRSI(Symbol(), Period(), RsiPeriod, PRICE_CLOSE, 0);
-   double ema50 = iMA(Symbol(), Period(), EmaFastPeriod, 0, MODE_EMA, PRICE_CLOSE, 0);
-   double ema200 = iMA(Symbol(), Period(), EmaSlowPeriod, 0, MODE_EMA, PRICE_CLOSE, 0);
-   double support = RecentLow(SupportResistanceBars);
-   double resistance = RecentHigh(SupportResistanceBars);
-
-   string payload = StringFormat(
-      "{\"symbol\":\"%s\",\"timeframe\":\"%s\",\"price\":%s,\"rsi\":%s,\"ema50\":%s,\"ema200\":%s,\"support\":%s,\"resistance\":%s}",
-      Symbol(),
-      ChartTimeframe(),
-      PriceJson(price),
-      PriceJson(rsi),
-      PriceJson(ema50),
-      PriceJson(ema200),
-      PriceJson(support),
-      PriceJson(resistance)
+   string payload = StringConcatenate(
+      "{\"symbol\":\"", Symbol(),
+      "\",\"timeframe\":\"H4\",\"timeframes\":{\"D1\":{", TimeframeMetricsJson(PERIOD_D1),
+      "},\"H4\":{", TimeframeMetricsJson(PERIOD_H4),
+      "},\"H1\":{", TimeframeMetricsJson(PERIOD_H1),
+      "}}}"
    );
 
    string body;

@@ -5,9 +5,11 @@ abort("The Rails environment is running in production mode!") if Rails.env.produ
 
 require "rspec/rails"
 require "support/openai_helpers"
+require "support/market_data_helpers"
 
 RSpec.configure do |config|
   config.include OpenaiTestHelpers
+  config.include MarketDataHelpers
 
   config.use_transactional_fixtures = true
   config.infer_spec_type_from_file_location!

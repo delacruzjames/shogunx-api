@@ -18,9 +18,9 @@ RSpec.describe NewsFilterService do
       expect(result).to eq(allowed: true, reason: "clear of high impact news")
     end
 
-    it "blocks trading 30 minutes before high-impact news" do
+    it "blocks trading 60 minutes before high-impact news" do
       now = Time.zone.parse("2026-06-03 12:00:00")
-      create_high_impact_event(scheduled_at: now + 30.minutes)
+      create_high_impact_event(scheduled_at: now + 60.minutes)
 
       result = described_class.new(at: now, sync_calendar: false).call
 
@@ -28,9 +28,9 @@ RSpec.describe NewsFilterService do
       expect(result[:reason]).to eq("high impact USD news: Test Event")
     end
 
-    it "blocks trading 30 minutes after high-impact news" do
+    it "blocks trading 60 minutes after high-impact news" do
       now = Time.zone.parse("2026-06-03 12:00:00")
-      create_high_impact_event(scheduled_at: now - 30.minutes)
+      create_high_impact_event(scheduled_at: now - 60.minutes)
 
       result = described_class.new(at: now, sync_calendar: false).call
 
@@ -48,9 +48,9 @@ RSpec.describe NewsFilterService do
       expect(result[:reason]).to eq("high impact USD news: Test Event")
     end
 
-    it "allows trading just outside the 30-minute buffer" do
+    it "allows trading just outside the 60-minute buffer" do
       now = Time.zone.parse("2026-06-03 12:00:00")
-      create_high_impact_event(scheduled_at: now + 31.minutes)
+      create_high_impact_event(scheduled_at: now + 61.minutes)
 
       result = described_class.new(at: now, sync_calendar: false).call
 

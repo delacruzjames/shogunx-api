@@ -34,16 +34,15 @@ RSpec.describe ProcessMarketSnapshotService do
   end
 
   def build_snapshot(symbol: "XAUUSD", rsi: 68, ema50: 4490, ema200: 4470, support: 3350, resistance: 3380)
-    MarketSnapshot.create!(
+    create_multi_timeframe_snapshots(
       symbol: symbol,
-      timeframe: "H4",
       price: 4448.87,
       rsi: rsi,
       ema50: ema50,
       ema200: ema200,
       support: support,
       resistance: resistance
-    )
+    ).find { |snapshot| snapshot.timeframe == "H4" }
   end
 
   describe "#call" do

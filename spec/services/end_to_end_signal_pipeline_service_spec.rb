@@ -2,16 +2,14 @@ require "rails_helper"
 
 RSpec.describe EndToEndSignalPipelineService do
   def build_snapshot(rsi: 68, ema50: 4490, ema200: 4470, support: 3350, resistance: 3380)
-    MarketSnapshot.create!(
-      symbol: "XAUUSD",
-      timeframe: "H4",
+    create_multi_timeframe_snapshots(
       price: 4448.87,
       rsi: rsi,
       ema50: ema50,
       ema200: ema200,
       support: support,
       resistance: resistance
-    )
+    ).find { |snapshot| snapshot.timeframe == "H4" }
   end
 
   describe "#call" do
@@ -22,7 +20,8 @@ RSpec.describe EndToEndSignalPipelineService do
       pipeline.call
 
       expect(pipeline.market_summary[:symbol]).to eq("XAUUSD")
-      expect(pipeline.market_summary[:snapshot_count]).to eq(1)
+      expect(pipeline.market_summary[:snapshot_count]).to eq(3)
+      expect(pipeline.market_summary[:timeframes]["H4"][:snapshot_count]).to eq(1)
     end
 
     it "returns HOLD when analysis is WAIT" do

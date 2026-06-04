@@ -54,18 +54,17 @@ Source: [`mt4/ShogunX.mq4`](mt4/ShogunX.mq4)
 
   ```json
   {
-    "symbol": "EURUSD",
-    "timeframe": "H1",
-    "price": 1.08500,
-    "rsi": 55.25,
-    "ema50": 1.08400,
-    "ema200": 1.08200,
-    "support": 1.08000,
-    "resistance": 1.09000
+    "symbol": "XAUUSD",
+    "timeframe": "H4",
+    "timeframes": {
+      "D1": { "price": 2650.10, "rsi": 58.2, "ema50": 2640, "ema200": 2600, "support": 2620, "resistance": 2680 },
+      "H4": { "price": 2655.40, "rsi": 62.1, "ema50": 2650, "ema200": 2635, "support": 2640, "resistance": 2670 },
+      "H1": { "price": 2656.00, "rsi": 55.0, "ema50": 2654, "ema200": 2650, "support": 2650, "resistance": 2665 }
+    }
   }
   ```
 
-  `timeframe` is the chart period; `price` is **Bid**; `rsi` / `ema50` / `ema200` from built-in indicators; `support` / `resistance` are the lowest low and highest high over **SupportResistanceBars** (default 20).
+  The EA sends **D1**, **H4**, and **H1** metrics each cycle (close price, RSI, EMA50/200, support/resistance over **SupportResistanceBars**). Flat payloads with top-level `price` / `rsi` / … are still accepted and applied to all three timeframes for backward compatibility.
 
 - Parses the flat Rails JSON response and places pending orders when approved:
   - `HOLD` — no trade (logs `reason`)
@@ -164,7 +163,7 @@ Common commands: `make logs`, `make console`, `make test`, `make down`.
 
 ### News filter (ForexFactory)
 
-`NewsFilterService` syncs high-impact USD events from the [ForexFactory calendar](https://nfs.faireconomy.media/ff_calendar_thisweek.json) and blocks new trades from **30 minutes before** through **30 minutes after** each release. `RiskRuleService` surfaces the rejection as `high impact USD news: <event title>`.
+`NewsFilterService` syncs high-impact USD events from the [ForexFactory calendar](https://nfs.faireconomy.media/ff_calendar_thisweek.json) and blocks new trades from **60 minutes before** through **60 minutes after** each release (aligned with the Brain prompt). `RiskRuleService` surfaces the rejection as `high impact USD news: <event title>`.
 
 `OpenaiAnalysisService` includes the same calendar context in every Brain prompt via `NewsContextService` (blackout status + upcoming USD high-impact releases), so the model can prefer **WAIT** near news even before the risk gate runs.
 

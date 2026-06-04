@@ -5,17 +5,14 @@ RSpec.describe OpenaiAnalysisService do
 
   before { EconomicEvent.delete_all }
 
-  def create_snapshot(ema50:, ema200:, rsi:, price: 4448.87, timeframe: "H4")
-    MarketSnapshot.create!(
-      symbol: "XAUUSD",
-      timeframe: timeframe,
+  def create_snapshot(ema50:, ema200:, rsi:, price: 4448.87, **attrs)
+    create_multi_timeframe_snapshots(
       price: price,
       rsi: rsi,
       ema50: ema50,
       ema200: ema200,
-      support: 4430,
-      resistance: 4490
-    )
+      **attrs
+    ).find { |snapshot| snapshot.timeframe == "H4" }
   end
 
   def service_for(snapshot, chat_client:, max_retries: 3, news_context_service: nil)
@@ -45,14 +42,12 @@ RSpec.describe OpenaiAnalysisService do
     end
 
     it "returns WAIT without calling OpenAI when market data is insufficient" do
-      snapshot = MarketSnapshot.create!(
-        symbol: "XAUUSD",
-        timeframe: "H4",
+      snapshot = create_multi_timeframe_snapshots(
         price: 4500,
         rsi: nil,
         ema50: nil,
         ema200: nil
-      )
+      ).find { |s| s.timeframe == "H4" }
       chat_client = instance_double(Openai::ChatClient)
       expect(chat_client).not_to receive(:chat)
 
@@ -109,14 +104,32 @@ RSpec.describe OpenaiAnalysisService do
 
       expect(chat_client).to have_received(:chat) do |parameters:|
         prompt = parameters[:messages].last[:content]
-        expect(prompt).to include("current_price: 4500")
-        expect(prompt).to include("average_rsi:")
-        expect(prompt).to include("ema50_trend:")
-        expect(prompt).to include("timeframe: H4")
-        expect(prompt).to include("News Context (ForexFactory calendar):")
+        expect(prompt).to include("H4 timeframe:")
+        expect(prompt).to include("price: 4500")
+        expect(prompt).to include("D1 timeframe:")
+        expect(prompt).to include("H1 timeframe:")
+        expect(prompt).to include("News Context:")
+        expect(prompt).to include("Never force a trade")
+        expect(prompt).to include("If confidence is below 70, return WAIT")
         expect(prompt).to include(NewsContextService::CALENDAR_URL)
         expect(prompt).to include("trading_blackout: clear")
+        expect(prompt).to include("blackout_window_minutes: 60")
       end
+    end
+
+    it "normalizes BUY below the confidence threshold to WAIT" do
+      snapshot = create_snapshot(ema50: 4490, ema200: 4470, rsi: 60)
+      chat_client = openai_json_response(
+        action: "BUY",
+        confidence: 65,
+        reason: "Weak setup"
+      )
+
+      trade_signal = service_for(snapshot, chat_client: chat_client).call
+
+      expect(trade_signal.action).to eq("WAIT")
+      expect(trade_signal.confidence).to eq(0)
+      expect(trade_signal.reason).to include("below 70 threshold")
     end
 
     it "includes ForexFactory news context from upcoming economic events" do
