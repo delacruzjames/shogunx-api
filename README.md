@@ -70,6 +70,7 @@ Source: [`mt4/ShogunX.mq4`](mt4/ShogunX.mq4)
 - Parses the flat Rails JSON response and places pending orders when approved:
   - `HOLD` — no trade (logs `reason`)
   - `BUY_LIMIT` / `SELL_LIMIT` / `BUY_STOP` / `SELL_STOP` — `OrderSend` with `LotSize`, `MagicNumber`, SL/TP from Rails
+- Polls `GET /api/v1/execution` on attach, each timer tick, and every **OrderPollSeconds** on tick to place Rails orders that are still `pending` (e.g. after a failed earlier EA run).
   - Skips duplicate `order_id` values (global variable + open-order comment `ShogunX#<id>`)
   - **POST**s `order_updates` for order lifecycle: `placed`, `triggered`, `cancelled`, `expired`, `closed`
   - **POST**s `position_updates` for position lifecycle: `open` (with `entry_price`), `closed` (with `profit_loss`)

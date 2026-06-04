@@ -1,11 +1,11 @@
 require "rails_helper"
 
 RSpec.describe OrderCreationService do
-  def build_trade_signal(action:, support: 3350.0, resistance: 3380.0, expires_at: nil)
+  def build_trade_signal(action:, support: 3350.0, resistance: 3380.0, price: 3350, expires_at: nil)
     snapshot = MarketSnapshot.create!(
       symbol: "XAUUSD",
       timeframe: "H4",
-      price: 3350,
+      price: price,
       rsi: 60,
       ema50: 3360,
       ema200: 3340,
@@ -40,7 +40,7 @@ RSpec.describe OrderCreationService do
     end
 
     it "creates a pending BUY order from the plan" do
-      signal = build_trade_signal(action: "BUY")
+      signal = build_trade_signal(action: "BUY", price: 3360)
       expires_at = 1.day.from_now
       signal.update!(expires_at: expires_at)
 

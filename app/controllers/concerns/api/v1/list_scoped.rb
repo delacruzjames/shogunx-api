@@ -3,16 +3,45 @@ module Api
     module ListScoped
       extend ActiveSupport::Concern
 
-      DEFAULT_LIMIT = 100
-      MAX_LIMIT = 500
+      DEFAULT_PER_PAGE = 50
+      MAX_PER_PAGE = 100
 
       private
 
-      def list_limit
-        requested = params[:limit].to_i
-        return DEFAULT_LIMIT if requested <= 0
+      def paginate(scope)
+        page, per_page = pagination_values
+        total_count = scope.count
+        records = scope.offset((page - 1) * per_page).limit(per_page)
 
-        [ requested, MAX_LIMIT ].min
+        {
+          records: records,
+          meta: {
+            page: page,
+            per_page: per_page,
+            total_count: total_count,
+            total_pages: total_pages_for(total_count, per_page)
+          }
+        }
+      end
+
+      def pagination_values
+        page = params[:page].to_i
+        page = 1 if page < 1
+
+        per_page = params[:per_page].to_i
+        if per_page <= 0
+          legacy_limit = params[:limit].to_i
+          per_page = legacy_limit.positive? ? legacy_limit : DEFAULT_PER_PAGE
+        end
+        per_page = [ per_page, MAX_PER_PAGE ].min
+
+        [ page, per_page ]
+      end
+
+      def total_pages_for(total_count, per_page)
+        return 0 if total_count.zero?
+
+        (total_count.to_f / per_page).ceil
       end
     end
   end

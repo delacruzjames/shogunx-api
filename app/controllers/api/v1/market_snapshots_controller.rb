@@ -7,8 +7,11 @@ module Api
         scope = MarketSnapshot.order(created_at: :desc)
         scope = scope.where(symbol: params[:symbol]) if params[:symbol].present?
 
-        snapshots = scope.limit(list_limit)
-        render json: { data: snapshots.map { |snapshot| JsonPresenter.market_snapshot(snapshot) } }
+        result = paginate(scope)
+        render json: {
+          data: result[:records].map { |snapshot| JsonPresenter.market_snapshot(snapshot) },
+          meta: result[:meta]
+        }
       end
     end
   end

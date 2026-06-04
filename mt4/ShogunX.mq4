@@ -19,6 +19,7 @@ input bool   VerboseLog             = true;
 string g_signalsUrl         = "";
 string g_orderUpdatesUrl    = "";
 string g_positionUpdatesUrl = "";
+string g_executionUrl       = "";
 string g_apiBase            = "";
 datetime g_lastOrderPoll = 0;
 
@@ -51,6 +52,11 @@ string OrderUpdatesUrl()
 string PositionUpdatesUrl()
 {
    return ApiBase() + "/api/v1/position_updates";
+}
+
+string ExecutionUrl()
+{
+   return ApiBase() + "/api/v1/execution";
 }
 
 string ChartTimeframe()
@@ -178,13 +184,14 @@ bool TestApiReachable()
 
 // --- JSON helpers (flat Rails responses) ---
 
+// Match only real JSON object keys (avoids "stop_action":true matching "action":true).
 int JsonKeyPos(string json, string key)
 {
    string patterns[4];
-   patterns[0] = "\"" + key + "\":\"";
-   patterns[1] = "\"" + key + "\": \"";
-   patterns[2] = "\"" + key + "\":";
-   patterns[3] = "\"" + key + "\": ";
+   patterns[0] = "{\"" + key + "\":\"";
+   patterns[1] = "{\"" + key + "\": \"";
+   patterns[2] = ",\"" + key + "\":\"";
+   patterns[3] = ",\"" + key + "\": \"";
 
    int i;
    for(i = 0; i < 4; i++)
@@ -193,6 +200,19 @@ int JsonKeyPos(string json, string key)
       if(pos >= 0)
          return pos + StringLen(patterns[i]);
    }
+
+   patterns[0] = "{\"" + key + "\":";
+   patterns[1] = "{\"" + key + "\": ";
+   patterns[2] = ",\"" + key + "\":";
+   patterns[3] = ",\"" + key + "\": ";
+
+   for(i = 0; i < 4; i++)
+   {
+      int pos = StringFind(json, patterns[i]);
+      if(pos >= 0)
+         return pos + StringLen(patterns[i]);
+   }
+
    return -1;
 }
 
@@ -582,10 +602,54 @@ bool PlaceSellStop(string tradeSymbol, double lots, double entryPrice, double st
    return SendPendingOrder(tradeSymbol, OP_SELLSTOP, lots, entryPrice, stopLoss, takeProfit, OrderComment(orderId), orderId) >= 0;
 }
 
+bool ActionMatches(string action, string expected)
+{
+   return StringCompare(action, expected, false) == 0;
+}
+
+bool IsKnownTradeAction(string action)
+{
+   return ActionMatches(action, "HOLD")
+      || ActionMatches(action, "BUY_LIMIT")
+      || ActionMatches(action, "SELL_LIMIT")
+      || ActionMatches(action, "BUY_STOP")
+      || ActionMatches(action, "SELL_STOP");
+}
+
+string ResolveActionFromBody(string body, string action)
+{
+   if(IsKnownTradeAction(action))
+      return action;
+
+   string knownActions[5];
+   knownActions[0] = "BUY_LIMIT";
+   knownActions[1] = "SELL_LIMIT";
+   knownActions[2] = "BUY_STOP";
+   knownActions[3] = "SELL_STOP";
+   knownActions[4] = "HOLD";
+
+   int i;
+   for(i = 0; i < 5; i++)
+   {
+      string pattern = "\"action\":\"" + knownActions[i] + "\"";
+      if(StringFind(body, pattern) >= 0)
+      {
+         Log("Resolved action from body pattern: " + knownActions[i]
+             + " (parsed=\"" + action + "\")");
+         return knownActions[i];
+      }
+   }
+
+   return action;
+}
+
 void ProcessExecutionResponse(string body)
 {
    string action = JsonExtractString(body, "action");
-   StringToUpper(action);
+   StringTrimLeft(action);
+   StringTrimRight(action);
+   action = StringToUpper(action);
+   action = ResolveActionFromBody(body, action);
 
    if(StringLen(action) == 0)
    {
@@ -593,7 +657,7 @@ void ProcessExecutionResponse(string body)
       return;
    }
 
-   if(action == "HOLD")
+   if(ActionMatches(action, "HOLD"))
    {
       string reason = JsonExtractString(body, "reason");
       Log("HOLD — no trade placed. reason=" + reason);
@@ -623,17 +687,18 @@ void ProcessExecutionResponse(string body)
 
    bool placed = false;
 
-   if(action == "BUY_LIMIT")
+   if(ActionMatches(action, "BUY_LIMIT"))
       placed = PlaceBuyLimit(tradeSymbol, LotSize, entryPrice, stopLoss, takeProfit, orderId);
-   else if(action == "SELL_LIMIT")
+   else if(ActionMatches(action, "SELL_LIMIT"))
       placed = PlaceSellLimit(tradeSymbol, LotSize, entryPrice, stopLoss, takeProfit, orderId);
-   else if(action == "BUY_STOP")
+   else if(ActionMatches(action, "BUY_STOP"))
       placed = PlaceBuyStop(tradeSymbol, LotSize, entryPrice, stopLoss, takeProfit, orderId);
-   else if(action == "SELL_STOP")
+   else if(ActionMatches(action, "SELL_STOP"))
       placed = PlaceSellStop(tradeSymbol, LotSize, entryPrice, stopLoss, takeProfit, orderId);
    else
    {
-      Log("Unsupported action: " + action);
+      Log("Unsupported action: [" + action + "] len=" + IntegerToString(StringLen(action))
+          + " — recompile ShogunX.mq4 in MetaEditor (F7) and re-attach EA");
       return;
    }
 
@@ -682,6 +747,25 @@ void SendSignal()
       Log("Non-success HTTP code — skipping execution.");
 }
 
+void PollPendingExecution()
+{
+   string body;
+   int httpCode;
+
+   Log("Polling pending execution -> " + g_executionUrl);
+
+   if(!WebGet(g_executionUrl, body, httpCode))
+   {
+      LogWebRequestError(GetLastError());
+      return;
+   }
+
+   Log("Execution poll HTTP " + IntegerToString(httpCode) + " body=" + body);
+
+   if(httpCode >= 200 && httpCode < 300)
+      ProcessExecutionResponse(body);
+}
+
 int OnInit()
 {
    if(IntervalSeconds < 1)
@@ -712,12 +796,14 @@ int OnInit()
    g_signalsUrl = SignalsUrl();
    g_orderUpdatesUrl = OrderUpdatesUrl();
    g_positionUpdatesUrl = PositionUpdatesUrl();
+   g_executionUrl = ExecutionUrl();
 
    Log("EA started on " + Symbol() + " " + ChartTimeframe()
        + " — snapshot every " + IntegerToString(IntervalSeconds) + "s ("
        + DoubleToString(IntervalSeconds / 3600.0, 2) + "h)");
    Log("Whitelist in MT4 (no port): " + g_apiBase);
    Log("Signals URL: " + g_signalsUrl);
+   Log("Execution URL: " + g_executionUrl);
    Log("Order updates URL: " + g_orderUpdatesUrl);
    Log("Position updates URL: " + g_positionUpdatesUrl);
    Log("LotSize=" + DoubleToString(LotSize, 2) + " MagicNumber=" + IntegerToString(MagicNumber));
@@ -740,6 +826,7 @@ int OnInit()
 
    EventSetTimer(IntervalSeconds);
    SendSignal();
+   PollPendingExecution();
    return(INIT_SUCCEEDED);
 }
 
@@ -752,6 +839,7 @@ void OnDeinit(const int reason)
 void OnTimer()
 {
    SendSignal();
+   PollPendingExecution();
 }
 
 void OnTick()
@@ -763,5 +851,6 @@ void OnTick()
       return;
 
    g_lastOrderPoll = TimeCurrent();
+   PollPendingExecution();
    PollShogunXOrderLifecycle();
 }

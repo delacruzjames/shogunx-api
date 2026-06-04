@@ -19,6 +19,12 @@ RSpec.describe "Api::V1::MarketSnapshots", type: :request do
       expect(response).to have_http_status(:ok)
       body = response.parsed_body
       expect(body["data"].size).to eq(1)
+      expect(body["meta"]).to include(
+        "page" => 1,
+        "per_page" => 50,
+        "total_count" => 1,
+        "total_pages" => 1
+      )
       row = body["data"].first
       expect(row).to include(
         "symbol" => "XAUUSD",

@@ -7,8 +7,11 @@ module Api
         scope = TradeSignal.order(created_at: :desc)
         scope = scope.where(symbol: params[:symbol]) if params[:symbol].present?
 
-        signals = scope.limit(list_limit)
-        render json: { data: signals.map { |signal| JsonPresenter.trade_signal(signal) } }
+        result = paginate(scope)
+        render json: {
+          data: result[:records].map { |signal| JsonPresenter.trade_signal(signal) },
+          meta: result[:meta]
+        }
       end
     end
   end

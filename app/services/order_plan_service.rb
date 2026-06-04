@@ -57,17 +57,20 @@ class OrderPlanService
   end
 
   def build_plan(levels)
+    market_price = current_market_price
+    return nil if market_price.nil?
+
     case @trade_signal.action
     when "BUY"
       entry_price = levels[:support]
       stop_loss = levels[:support] - levels[:buffer]
       take_profit = levels[:resistance]
-      entry_type = "BUY_LIMIT"
+      entry_type = entry_type_for_buy(entry_price, market_price)
     when "SELL"
       entry_price = levels[:resistance]
       stop_loss = levels[:resistance] + levels[:buffer]
       take_profit = levels[:support]
-      entry_type = "SELL_LIMIT"
+      entry_type = entry_type_for_sell(entry_price, market_price)
     else
       return nil
     end
@@ -115,5 +118,21 @@ class OrderPlanService
 
   def round_risk_reward(value)
     value.to_f.round(RISK_REWARD_PRECISION)
+  end
+
+  def current_market_price
+    price = @trade_signal.market_snapshot&.price&.to_f
+    return nil if price.nil? || price <= 0
+
+    price
+  end
+
+  # MT4: BUY_LIMIT below market, BUY_STOP above; SELL_LIMIT above market, SELL_STOP below.
+  def entry_type_for_buy(entry_price, market_price)
+    entry_price < market_price ? "BUY_LIMIT" : "BUY_STOP"
+  end
+
+  def entry_type_for_sell(entry_price, market_price)
+    entry_price > market_price ? "SELL_LIMIT" : "SELL_STOP"
   end
 end

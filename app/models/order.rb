@@ -1,6 +1,11 @@
 class Order < ApplicationRecord
   ACTIONS = %w[BUY SELL].freeze
-  ENTRY_TYPES = %w[BUY_LIMIT SELL_LIMIT].freeze
+  ENTRY_TYPES = %w[BUY_LIMIT SELL_LIMIT BUY_STOP SELL_STOP].freeze
+
+  ENTRY_TYPES_BY_ACTION = {
+    "BUY" => %w[BUY_LIMIT BUY_STOP],
+    "SELL" => %w[SELL_LIMIT SELL_STOP]
+  }.freeze
 
   belongs_to :trade_signal
   has_one :position, dependent: :destroy
@@ -27,9 +32,9 @@ class Order < ApplicationRecord
   def entry_type_matches_action
     return if action.blank? || entry_type.blank?
 
-    expected = "#{action}_LIMIT"
-    return if entry_type == expected
+    allowed = ENTRY_TYPES_BY_ACTION[action]
+    return if allowed&.include?(entry_type)
 
-    errors.add(:entry_type, "must be #{expected} for action #{action}")
+    errors.add(:entry_type, "must be #{allowed.join(' or ')} for action #{action}")
   end
 end

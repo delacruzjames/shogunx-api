@@ -33,6 +33,7 @@ RSpec.describe "Api::V1::Orders", type: :request do
       expect(response).to have_http_status(:ok)
       body = response.parsed_body
       expect(body["data"].size).to eq(1)
+      expect(body["meta"]["total_count"]).to eq(1)
       expect(body["data"].first).to include(
         "id" => order.id,
         "action" => "BUY",

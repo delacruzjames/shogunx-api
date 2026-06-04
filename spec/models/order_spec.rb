@@ -144,7 +144,7 @@ RSpec.describe Order, type: :model do
       order = described_class.new(valid_attributes.merge(entry_type: "SELL_LIMIT"))
 
       expect(order).not_to be_valid
-      expect(order.errors[:entry_type]).to include("must be BUY_LIMIT for action BUY")
+      expect(order.errors[:entry_type]).to include("must be BUY_LIMIT or BUY_STOP for action BUY")
     end
   end
 

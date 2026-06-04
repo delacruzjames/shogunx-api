@@ -7,8 +7,11 @@ module Api
         scope = Order.order(created_at: :desc)
         scope = scope.where(status: params[:status]) if params[:status].present?
 
-        orders = scope.limit(list_limit)
-        render json: { data: orders.map { |order| JsonPresenter.order(order) } }
+        result = paginate(scope)
+        render json: {
+          data: result[:records].map { |order| JsonPresenter.order(order) },
+          meta: result[:meta]
+        }
       end
     end
   end

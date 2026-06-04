@@ -44,6 +44,7 @@ RSpec.describe "Api::V1::Positions index", type: :request do
       expect(response).to have_http_status(:ok)
       body = response.parsed_body
       expect(body["data"].size).to eq(1)
+      expect(body["meta"]["page"]).to eq(1)
       expect(body["data"].first).to include(
         "id" => position.id,
         "ticket" => position.ticket,

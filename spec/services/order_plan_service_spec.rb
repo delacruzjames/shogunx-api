@@ -31,7 +31,7 @@ RSpec.describe OrderPlanService do
     end
 
     it "builds a BUY limit plan near support with stop below and target at resistance" do
-      signal = build_trade_signal(action: "BUY", support: 3350.0, resistance: 3380.0)
+      signal = build_trade_signal(action: "BUY", support: 3350.0, resistance: 3380.0, price: 3360.0)
 
       plan = described_class.new(signal).call
 
@@ -46,7 +46,7 @@ RSpec.describe OrderPlanService do
     end
 
     it "builds a SELL limit plan near resistance with stop above and target at support" do
-      signal = build_trade_signal(action: "SELL", support: 3350.0, resistance: 3380.0)
+      signal = build_trade_signal(action: "SELL", support: 3350.0, resistance: 3380.0, price: 3355.0)
 
       plan = described_class.new(signal).call
 
@@ -57,6 +57,37 @@ RSpec.describe OrderPlanService do
         stop_loss: 3395.0,
         take_profit: 3350.0,
         risk_reward: 2.0
+      )
+    end
+
+    it "uses SELL_STOP when price is above resistance (sell on pullback)" do
+      signal = build_trade_signal(
+        action: "SELL",
+        support: 4458.51,
+        resistance: 4504.6,
+        price: 4512.5
+      )
+
+      plan = described_class.new(signal).call
+
+      expect(plan).to include(
+        action: "SELL",
+        entry_type: "SELL_STOP",
+        entry_price: 4504.6,
+        stop_loss: 4527.645,
+        take_profit: 4458.51
+      )
+    end
+
+    it "uses BUY_STOP when price is below support (buy on breakout)" do
+      signal = build_trade_signal(action: "BUY", support: 3350.0, resistance: 3380.0, price: 3340.0)
+
+      plan = described_class.new(signal).call
+
+      expect(plan).to include(
+        action: "BUY",
+        entry_type: "BUY_STOP",
+        entry_price: 3350.0
       )
     end
 
@@ -96,7 +127,7 @@ RSpec.describe OrderPlanService do
     end
 
     it "creates a pending order from the plan" do
-      signal = build_trade_signal(action: "BUY", support: 3350.0, resistance: 3380.0)
+      signal = build_trade_signal(action: "BUY", support: 3350.0, resistance: 3380.0, price: 3360.0)
       expires_at = 1.day.from_now
       signal.update!(expires_at: expires_at)
 

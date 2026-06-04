@@ -8,8 +8,11 @@ module Api
         scope = scope.where(status: params[:status]) if params[:status].present?
         scope = scope.where(symbol: params[:symbol]) if params[:symbol].present?
 
-        positions = scope.limit(list_limit)
-        render json: { data: positions.map { |position| JsonPresenter.position(position) } }
+        result = paginate(scope)
+        render json: {
+          data: result[:records].map { |position| JsonPresenter.position(position) },
+          meta: result[:meta]
+        }
       end
 
       def create
