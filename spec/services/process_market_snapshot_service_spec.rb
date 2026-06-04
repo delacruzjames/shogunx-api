@@ -72,7 +72,7 @@ RSpec.describe ProcessMarketSnapshotService do
       result = described_class.new(snapshot).call
 
       expect(result[:action]).to eq("BUY_LIMIT")
-      expect(result[:order_id]).to eq(Order.last.id)
+      expect(result[:order_id]).to eq(Order.find_by!(tp_leg: 1).id)
       expect(result[:entry_price]).to eq(3350)
     end
 

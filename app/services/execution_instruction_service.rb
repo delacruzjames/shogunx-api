@@ -21,7 +21,7 @@ class ExecutionInstructionService
   private
 
   def latest_pending_order
-    Order.pending.order(created_at: :desc).first
+    Order.pending.order(tp_leg: :asc, created_at: :asc, id: :asc).first
   end
 
   def executable_instruction(order)

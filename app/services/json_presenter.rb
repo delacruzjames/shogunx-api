@@ -36,6 +36,7 @@ class JsonPresenter
         entry_price: order.entry_price,
         stop_loss: order.stop_loss,
         take_profit: order.take_profit,
+        tp_leg: order.tp_leg,
         status: order.status,
         expires_at: order.expires_at&.iso8601,
         created_at: order.created_at.iso8601

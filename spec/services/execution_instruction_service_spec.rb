@@ -1,7 +1,7 @@
 require "rails_helper"
 
 RSpec.describe ExecutionInstructionService do
-  def create_pending_order(created_at: Time.current, status: :pending, symbol: "XAUUSD")
+  def create_pending_order(created_at: Time.current, status: :pending, symbol: "XAUUSD", tp_leg: 1)
     snapshot = MarketSnapshot.create!(
       symbol: symbol,
       timeframe: "H4",
@@ -28,6 +28,7 @@ RSpec.describe ExecutionInstructionService do
       stop_loss: 3335,
       take_profit: 3380,
       risk_reward: 2.0,
+      tp_leg: tp_leg,
       status: status,
       created_at: created_at
     )
@@ -45,19 +46,19 @@ RSpec.describe ExecutionInstructionService do
       )
     end
 
-    it "returns executable instruction for the latest pending order" do
-      create_pending_order(created_at: 2.hours.ago)
-      latest = create_pending_order(created_at: 1.hour.ago)
+    it "returns executable instruction for the oldest pending order (TP leg queue)" do
+      oldest = create_pending_order(created_at: 2.hours.ago, tp_leg: 1)
+      create_pending_order(created_at: 1.hour.ago, tp_leg: 2)
 
       result = described_class.new.call
 
       expect(result[:order]).to include(
         action: "BUY_LIMIT",
-        order_id: latest.id,
+        order_id: oldest.id,
         symbol: "XAUUSD",
-        entry_price: latest.entry_price,
-        stop_loss: latest.stop_loss,
-        take_profit: latest.take_profit,
+        entry_price: oldest.entry_price,
+        stop_loss: oldest.stop_loss,
+        take_profit: oldest.take_profit,
         reason: "pending order ready for MT4 execution"
       )
     end

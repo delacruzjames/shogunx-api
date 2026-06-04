@@ -52,10 +52,14 @@ RSpec.describe "Api::V1::Signals", type: :request do
       body = response.parsed_body
       expect(body["action"]).to eq("BUY_LIMIT")
       expect(body["symbol"]).to eq("XAUUSD")
-      expect(body["order_id"]).to eq(Order.last.id)
+      expect(body["order_id"]).to eq(Order.find_by!(tp_leg: 1).id)
       expect(body["entry_price"]).to eq("3350.0")
       expect(body["stop_loss"]).to eq("3335.0")
-      expect(body["take_profit"]).to eq("3380.0")
+      expect(body["take_profit"]).to eq("3370.0")
+      expect(Order.pending.count).to eq(3)
+      expect(Order.pending.order(:tp_leg).pluck(:tp_leg, :take_profit)).to eq(
+        [ [ 1, 3370.0 ], [ 2, 3380.0 ], [ 3, 3380.0 ] ]
+      )
     end
 
     it "returns HOLD with rejection reason when risk blocks the trade" do

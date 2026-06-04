@@ -22,8 +22,10 @@ class EndToEndSignalPipelineService
       return hold_response(risk_result[:reason])
     end
 
-    order = plan_service.create_order_from_plan!(plan)
-    executable_response(order)
+    orders = plan_service.create_orders_from_plan!(plan)
+    return hold_response("no order plan available") if orders.blank?
+
+    executable_response(orders.first)
   end
 
   def market_summary

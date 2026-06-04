@@ -169,6 +169,22 @@ Common commands: `make logs`, `make console`, `make test`, `make down`.
 
 Background sync: `ForexFactoryCalendarSyncJob` (respects a 5-minute throttle). Set `FOREXFACTORY_SYNC_ON_FILTER=true` to refresh on every risk check (default in production). `FOREXFACTORY_SYNC_ON_OPENAI` controls sync before OpenAI analysis (defaults to the same value as `FOREXFACTORY_SYNC_ON_FILTER`).
 
+### Three take-profit orders
+
+When the pipeline approves a trade, `OrderPlanService` creates **three** `pending` orders (same entry, SL, and signal) with take profits at **20 / 30 / 40 pips**, each **capped** by the structural target (resistance for buys, support for sells).
+
+| Leg | Pips | Example (BUY @ 3350, max TP 3380) |
+|-----|------|-----------------------------------|
+| 1 | 20 | 3370 |
+| 2 | 30 | 3380 (capped) |
+| 3 | 40 | 3380 (capped) |
+
+The MT4 EA executes them **one at a time** via `GET /api/v1/execution` (oldest / lowest `tp_leg` first). Each uses the full EA `LotSize` — three legs means **3× lot exposure** unless you lower `LotSize`.
+
+For XAUUSD, one pip = **$1** on price by default (`SHOGUNX_PIP_SIZE=1.0`). Override with `SHOGUNX_PIP_SIZE` or `SHOGUNX_PIP_SIZE_BY_SYMBOL=XAUUSD=0.1` if your broker uses 0.1 per pip.
+
+Run `make db-migrate` after pulling to add the `tp_leg` column on `orders`.
+
 ### Trade statistics (dashboard)
 
 `GET /api/v1/statistics` — aggregated from closed `TradePerformance` records via `TradePerformanceService`.
@@ -209,6 +225,8 @@ Optional env vars: `APP_PORT` (default `3000`), `DB_PORT` (default `5433`).
 | `FOREXFACTORY_CALENDAR_URL` | Optional override (default `https://nfs.faireconomy.media/ff_calendar_thisweek.json`) |
 | `FOREXFACTORY_SYNC_ON_FILTER` | Refresh calendar before risk checks (default `true` outside test) |
 | `FOREXFACTORY_SYNC_ON_OPENAI` | Refresh calendar before OpenAI prompts (defaults to `FOREXFACTORY_SYNC_ON_FILTER`) |
+| `SHOGUNX_PIP_SIZE` | Price distance per pip (default `1.0` for XAUUSD) |
+| `SHOGUNX_PIP_SIZE_BY_SYMBOL` | Per-symbol overrides, e.g. `XAUUSD=1.0,EURUSD=0.0001` |
 | `RAILS_MASTER_KEY` | Rails credentials key (auto-loaded from `config/master.key` in dev) |
 
 ## Tech stack

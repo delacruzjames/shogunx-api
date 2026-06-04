@@ -41,9 +41,9 @@ RSpec.describe EndToEndSignalPipelineService do
       expect {
         result = described_class.new(snapshot).call
       }.to change(TradeSignal, :count).by(1)
-        .and change(Order, :count).by(1)
+        .and change(Order, :count).by(3)
 
-      order = Order.last
+      order = Order.find_by!(tp_leg: 1)
       expect(result).to eq(
         action: "BUY_LIMIT",
         order_id: order.id,

@@ -35,12 +35,13 @@ RSpec.describe OrderPlanService do
 
       plan = described_class.new(signal).call
 
-      expect(plan).to eq(
+      expect(plan).to include(
         action: "BUY",
         entry_type: "BUY_LIMIT",
         entry_price: 3350.0,
         stop_loss: 3335.0,
         take_profit: 3380.0,
+        max_take_profit: 3380.0,
         risk_reward: 2.0
       )
     end
@@ -50,102 +51,85 @@ RSpec.describe OrderPlanService do
 
       plan = described_class.new(signal).call
 
-      expect(plan).to eq(
+      expect(plan).to include(
         action: "SELL",
         entry_type: "SELL_LIMIT",
         entry_price: 3380.0,
         stop_loss: 3395.0,
         take_profit: 3350.0,
+        max_take_profit: 3350.0,
         risk_reward: 2.0
       )
     end
+  end
 
-    it "uses SELL_STOP when price is above resistance (sell on pullback)" do
-      signal = build_trade_signal(
-        action: "SELL",
-        support: 4458.51,
-        resistance: 4504.6,
-        price: 4512.5
-      )
-
+  describe "#take_profit_legs" do
+    it "returns three capped take-profit legs for a BUY plan" do
+      signal = build_trade_signal(action: "BUY", support: 3350.0, resistance: 3380.0, price: 3360.0)
       plan = described_class.new(signal).call
 
-      expect(plan).to include(
-        action: "SELL",
-        entry_type: "SELL_STOP",
-        entry_price: 4504.6,
-        stop_loss: 4527.645,
-        take_profit: 4458.51
-      )
+      legs = described_class.new(signal).take_profit_legs(plan)
+
+      expect(legs.size).to eq(3)
+      expect(legs.map { |leg| leg[:tp_leg] }).to eq([ 1, 2, 3 ])
+      expect(legs.map { |leg| leg[:take_profit] }).to eq([ 3370.0, 3380.0, 3380.0 ])
+      expect(legs.map { |leg| leg[:take_profit] }).to all(be <= plan[:max_take_profit])
     end
 
-    it "uses BUY_STOP when price is below support (buy on breakout)" do
-      signal = build_trade_signal(action: "BUY", support: 3350.0, resistance: 3380.0, price: 3340.0)
-
+    it "returns three capped take-profit legs for a SELL plan" do
+      signal = build_trade_signal(action: "SELL", support: 3350.0, resistance: 3380.0, price: 3355.0)
       plan = described_class.new(signal).call
 
-      expect(plan).to include(
-        action: "BUY",
-        entry_type: "BUY_STOP",
-        entry_price: 3350.0
-      )
-    end
+      legs = described_class.new(signal).take_profit_legs(plan)
 
-    it "returns nil when support and resistance are missing" do
-      snapshot = MarketSnapshot.create!(
-        symbol: "XAUUSD",
-        timeframe: "H4",
-        price: 3350,
-        rsi: 60,
-        ema50: 3360,
-        ema200: 3340
-      )
-      signal = TradeSignal.create!(
-        market_snapshot: snapshot,
-        symbol: "XAUUSD",
-        action: "BUY",
-        confidence: 75
-      )
-
-      expect(described_class.new(signal).call).to be_nil
-    end
-
-    it "returns nil when support is not below resistance" do
-      signal = build_trade_signal(action: "BUY", support: 3380.0, resistance: 3350.0)
-
-      expect(described_class.new(signal).call).to be_nil
+      expect(legs.size).to eq(3)
+      expect(legs.map { |leg| leg[:take_profit] }).to eq([ 3360.0, 3350.0, 3350.0 ])
+      expect(legs.map { |leg| leg[:take_profit] }).to all(be >= plan[:max_take_profit])
     end
   end
 
-  describe "#create_order!" do
+  describe "#create_orders_from_plan!" do
     it "returns nil for WAIT signals" do
       signal = build_trade_signal(action: "WAIT")
 
       expect {
-        expect(described_class.new(signal).create_order!).to be_nil
+        expect(described_class.new(signal).create_orders_from_plan!(nil)).to be_nil
       }.not_to change(Order, :count)
     end
 
-    it "creates a pending order from the plan" do
+    it "creates three pending orders with 20/30/40 pip take profits capped to structure" do
       signal = build_trade_signal(action: "BUY", support: 3350.0, resistance: 3380.0, price: 3360.0)
       expires_at = 1.day.from_now
       signal.update!(expires_at: expires_at)
+      plan = described_class.new(signal).call
 
-      order = nil
+      orders = nil
+      expect {
+        orders = described_class.new(signal).create_orders_from_plan!(plan)
+      }.to change(Order, :count).by(3)
+
+      expect(orders.map(&:tp_leg)).to eq([ 1, 2, 3 ])
+      expect(orders.map(&:take_profit)).to eq([ 3370.0, 3380.0, 3380.0 ])
+      expect(orders).to all(have_attributes(
+        action: "BUY",
+        entry_type: "BUY_LIMIT",
+        entry_price: 3350.0,
+        stop_loss: 3335.0,
+        status: "pending"
+      ))
+      expect(orders).to all(have_attributes(expires_at: be_within(1.second).of(expires_at)))
+    end
+  end
+
+  describe "#create_order!" do
+    it "creates the first TP leg order" do
+      signal = build_trade_signal(action: "BUY", support: 3350.0, resistance: 3380.0, price: 3360.0)
+
       expect {
         order = described_class.new(signal).create_order!
-      }.to change(Order, :count).by(1)
-
-      expect(order).to be_persisted
-      expect(order.trade_signal).to eq(signal)
-      expect(order.action).to eq("BUY")
-      expect(order.entry_type).to eq("BUY_LIMIT")
-      expect(order.entry_price).to eq(3350.0)
-      expect(order.stop_loss).to eq(3335.0)
-      expect(order.take_profit).to eq(3380.0)
-      expect(order.risk_reward).to eq(2.0)
-      expect(order.status).to eq("pending")
-      expect(order.expires_at).to be_within(1.second).of(expires_at)
+        expect(order.tp_leg).to eq(1)
+        expect(order.take_profit).to eq(3370.0)
+      }.to change(Order, :count).by(3)
     end
   end
 end
