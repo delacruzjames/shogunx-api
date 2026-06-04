@@ -21,7 +21,7 @@ RSpec.describe "Api::V1::MarketSnapshots", type: :request do
       expect(body["data"].size).to eq(1)
       expect(body["meta"]).to include(
         "page" => 1,
-        "per_page" => 50,
+        "per_page" => 20,
         "total_count" => 1,
         "total_pages" => 1
       )

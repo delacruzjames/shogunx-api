@@ -3,7 +3,7 @@ module Api
     module ListScoped
       extend ActiveSupport::Concern
 
-      DEFAULT_PER_PAGE = 50
+      DEFAULT_PER_PAGE = 20
       MAX_PER_PAGE = 100
 
       private

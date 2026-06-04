@@ -27,15 +27,27 @@ class OpenaiAnalysisService
     - momentum
     - support/resistance
     - risk/reward
+    - USD high-impact news calendar and trading blackout windows
 
     Market Summary:
     %{summary}
+
+    News Context (ForexFactory calendar):
+    %{news_context}
   PROMPT
 
-  def initialize(market_snapshot:, symbol: nil, summary_service: nil, chat_client: nil, max_retries: MAX_RETRIES)
+  def initialize(
+    market_snapshot:,
+    symbol: nil,
+    summary_service: nil,
+    news_context_service: nil,
+    chat_client: nil,
+    max_retries: MAX_RETRIES
+  )
     @market_snapshot = market_snapshot
     @symbol = symbol || market_snapshot.symbol
     @summary_service = summary_service
+    @news_context_service = news_context_service
     @chat_client = chat_client
     @max_retries = max_retries
   end
@@ -103,7 +115,15 @@ class OpenaiAnalysisService
   end
 
   def build_prompt(summary)
-    format(PROMPT_TEMPLATE, summary: format_summary(summary))
+    format(
+      PROMPT_TEMPLATE,
+      summary: format_summary(summary),
+      news_context: news_context_service.format_for_prompt
+    )
+  end
+
+  def news_context_service
+    @news_context_service ||= NewsContextService.new
   end
 
   def format_summary(summary)

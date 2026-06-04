@@ -18,7 +18,7 @@ RSpec.describe "Api::V1::TradeSignals", type: :request do
       expect(response).to have_http_status(:ok)
       body = response.parsed_body
       expect(body["data"].size).to eq(1)
-      expect(body["meta"]["per_page"]).to eq(50)
+      expect(body["meta"]["per_page"]).to eq(20)
       expect(body["data"].first).to include(
         "symbol" => "XAUUSD",
         "action" => "BUY",

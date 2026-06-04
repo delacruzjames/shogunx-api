@@ -2,29 +2,29 @@ require "rails_helper"
 
 RSpec.describe "Paginated list endpoints", type: :request do
   shared_examples "paginated index" do |path_helper, factory|
-    it "returns 50 records per page by default" do
-      51.times { |index| factory.call(index) }
+    it "returns 20 records per page by default" do
+      41.times { |index| factory.call(index) }
 
       get send(path_helper)
 
       body = response.parsed_body
       expect(response).to have_http_status(:ok)
-      expect(body["data"].size).to eq(50)
+      expect(body["data"].size).to eq(20)
       expect(body["meta"]).to eq(
         "page" => 1,
-        "per_page" => 50,
-        "total_count" => 51,
-        "total_pages" => 2
+        "per_page" => 20,
+        "total_count" => 41,
+        "total_pages" => 3
       )
     end
 
     it "returns the second page" do
-      51.times { |index| factory.call(index) }
+      41.times { |index| factory.call(index) }
 
       get send(path_helper), params: { page: 2 }
 
       body = response.parsed_body
-      expect(body["data"].size).to eq(1)
+      expect(body["data"].size).to eq(20)
       expect(body["meta"]["page"]).to eq(2)
     end
   end

@@ -166,7 +166,9 @@ Common commands: `make logs`, `make console`, `make test`, `make down`.
 
 `NewsFilterService` syncs high-impact USD events from the [ForexFactory calendar](https://nfs.faireconomy.media/ff_calendar_thisweek.json) and blocks new trades from **30 minutes before** through **30 minutes after** each release. `RiskRuleService` surfaces the rejection as `high impact USD news: <event title>`.
 
-Background sync: `ForexFactoryCalendarSyncJob` (respects a 5-minute throttle). Set `FOREXFACTORY_SYNC_ON_FILTER=true` to refresh on every risk check (default in production).
+`OpenaiAnalysisService` includes the same calendar context in every Brain prompt via `NewsContextService` (blackout status + upcoming USD high-impact releases), so the model can prefer **WAIT** near news even before the risk gate runs.
+
+Background sync: `ForexFactoryCalendarSyncJob` (respects a 5-minute throttle). Set `FOREXFACTORY_SYNC_ON_FILTER=true` to refresh on every risk check (default in production). `FOREXFACTORY_SYNC_ON_OPENAI` controls sync before OpenAI analysis (defaults to the same value as `FOREXFACTORY_SYNC_ON_FILTER`).
 
 ### Trade statistics (dashboard)
 
@@ -205,6 +207,9 @@ Optional env vars: `APP_PORT` (default `3000`), `DB_PORT` (default `5433`).
 | `SHOGUNX_API_KEY` | Planned: secret the MT4 EA will send as `X-ShogunX-Api-Key` (not in EA yet) |
 | `OPENAI_API_KEY` | OpenAI API key for `OpenaiAnalysisService` (required for live analysis) |
 | `OPENAI_MODEL` | Optional model override (default `gpt-4o-mini`) |
+| `FOREXFACTORY_CALENDAR_URL` | Optional override (default `https://nfs.faireconomy.media/ff_calendar_thisweek.json`) |
+| `FOREXFACTORY_SYNC_ON_FILTER` | Refresh calendar before risk checks (default `true` outside test) |
+| `FOREXFACTORY_SYNC_ON_OPENAI` | Refresh calendar before OpenAI prompts (defaults to `FOREXFACTORY_SYNC_ON_FILTER`) |
 | `RAILS_MASTER_KEY` | Rails credentials key (auto-loaded from `config/master.key` in dev) |
 
 ## Tech stack
