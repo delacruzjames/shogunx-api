@@ -47,7 +47,7 @@ RSpec.describe OrderCreationService do
       order = nil
       expect {
         order = described_class.new(signal).call
-      }.to change(Order, :count).by(1)
+      }.to change(Order, :count).by(3)
 
       expect(order).to be_persisted
       expect(order.trade_signal).to eq(signal)
@@ -55,8 +55,9 @@ RSpec.describe OrderCreationService do
       expect(order.entry_type).to eq("BUY_LIMIT")
       expect(order.entry_price).to eq(3350)
       expect(order.stop_loss).to eq(3335)
-      expect(order.take_profit).to eq(3380)
-      expect(order.risk_reward).to eq(2.0)
+      expect(order.take_profit).to eq(3370)
+      expect(order.tp_leg).to eq(1)
+      expect(order.risk_reward).to be > 0
       expect(order.status).to eq("pending")
       expect(order.expires_at).to be_within(1.second).of(expires_at)
       expect(order.opened_at).to be_nil
@@ -72,7 +73,8 @@ RSpec.describe OrderCreationService do
       expect(order.entry_type).to eq("SELL_LIMIT")
       expect(order.entry_price).to eq(3380)
       expect(order.stop_loss).to eq(3395)
-      expect(order.take_profit).to eq(3350)
+      expect(order.take_profit).to eq(3360)
+      expect(order.tp_leg).to eq(1)
       expect(order.status).to eq("pending")
     end
 

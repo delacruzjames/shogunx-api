@@ -1,5 +1,5 @@
 class NewsFilterService
-  BUFFER = 30.minutes
+  BUFFER = 60.minutes
   BLOCK_REASON = "high impact USD news"
 
   def initialize(at: Time.current, events: nil, sync_calendar: default_sync_calendar?)

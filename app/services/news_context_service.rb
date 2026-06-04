@@ -43,7 +43,7 @@ class NewsContextService
       end
     end
 
-    lines << "news_guidance: Prefer WAIT when trading_blackout is active or within the blackout window of a listed release."
+    lines << "news_guidance: Prefer WAIT when trading_blackout is active or within #{BUFFER.in_minutes.to_i} minutes before/after a listed release."
     lines.join("\n")
   end
 

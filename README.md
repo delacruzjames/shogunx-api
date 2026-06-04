@@ -54,18 +54,17 @@ Source: [`mt4/ShogunX.mq4`](mt4/ShogunX.mq4)
 
   ```json
   {
-    "symbol": "EURUSD",
-    "timeframe": "H1",
-    "price": 1.08500,
-    "rsi": 55.25,
-    "ema50": 1.08400,
-    "ema200": 1.08200,
-    "support": 1.08000,
-    "resistance": 1.09000
+    "symbol": "XAUUSD",
+    "timeframe": "H4",
+    "timeframes": {
+      "D1": { "price": 2650.10, "rsi": 58.2, "ema50": 2640, "ema200": 2600, "support": 2620, "resistance": 2680 },
+      "H4": { "price": 2655.40, "rsi": 62.1, "ema50": 2650, "ema200": 2635, "support": 2640, "resistance": 2670 },
+      "H1": { "price": 2656.00, "rsi": 55.0, "ema50": 2654, "ema200": 2650, "support": 2650, "resistance": 2665 }
+    }
   }
   ```
 
-  `timeframe` is the chart period; `price` is **Bid**; `rsi` / `ema50` / `ema200` from built-in indicators; `support` / `resistance` are the lowest low and highest high over **SupportResistanceBars** (default 20).
+  The EA sends **D1**, **H4**, and **H1** metrics each cycle (close price, RSI, EMA50/200, support/resistance over **SupportResistanceBars**). Flat payloads with top-level `price` / `rsi` / … are still accepted and applied to all three timeframes for backward compatibility.
 
 - Parses the flat Rails JSON response and places pending orders when approved:
   - `HOLD` — no trade (logs `reason`)
@@ -164,11 +163,27 @@ Common commands: `make logs`, `make console`, `make test`, `make down`.
 
 ### News filter (ForexFactory)
 
-`NewsFilterService` syncs high-impact USD events from the [ForexFactory calendar](https://nfs.faireconomy.media/ff_calendar_thisweek.json) and blocks new trades from **30 minutes before** through **30 minutes after** each release. `RiskRuleService` surfaces the rejection as `high impact USD news: <event title>`.
+`NewsFilterService` syncs high-impact USD events from the [ForexFactory calendar](https://nfs.faireconomy.media/ff_calendar_thisweek.json) and blocks new trades from **60 minutes before** through **60 minutes after** each release (aligned with the Brain prompt). `RiskRuleService` surfaces the rejection as `high impact USD news: <event title>`.
 
 `OpenaiAnalysisService` includes the same calendar context in every Brain prompt via `NewsContextService` (blackout status + upcoming USD high-impact releases), so the model can prefer **WAIT** near news even before the risk gate runs.
 
 Background sync: `ForexFactoryCalendarSyncJob` (respects a 5-minute throttle). Set `FOREXFACTORY_SYNC_ON_FILTER=true` to refresh on every risk check (default in production). `FOREXFACTORY_SYNC_ON_OPENAI` controls sync before OpenAI analysis (defaults to the same value as `FOREXFACTORY_SYNC_ON_FILTER`).
+
+### Three take-profit orders
+
+When the pipeline approves a trade, `OrderPlanService` creates **three** `pending` orders (same entry, SL, and signal) with take profits at **20 / 30 / 40 pips**, each **capped** by the structural target (resistance for buys, support for sells).
+
+| Leg | Pips | Example (BUY @ 3350, max TP 3380) |
+|-----|------|-----------------------------------|
+| 1 | 20 | 3370 |
+| 2 | 30 | 3380 (capped) |
+| 3 | 40 | 3380 (capped) |
+
+The MT4 EA executes them **one at a time** via `GET /api/v1/execution` (oldest / lowest `tp_leg` first). Each uses the full EA `LotSize` — three legs means **3× lot exposure** unless you lower `LotSize`.
+
+For XAUUSD, one pip = **$1** on price by default (`SHOGUNX_PIP_SIZE=1.0`). Override with `SHOGUNX_PIP_SIZE` or `SHOGUNX_PIP_SIZE_BY_SYMBOL=XAUUSD=0.1` if your broker uses 0.1 per pip.
+
+Run `make db-migrate` after pulling to add the `tp_leg` column on `orders`.
 
 ### Trade statistics (dashboard)
 
@@ -210,6 +225,8 @@ Optional env vars: `APP_PORT` (default `3000`), `DB_PORT` (default `5433`).
 | `FOREXFACTORY_CALENDAR_URL` | Optional override (default `https://nfs.faireconomy.media/ff_calendar_thisweek.json`) |
 | `FOREXFACTORY_SYNC_ON_FILTER` | Refresh calendar before risk checks (default `true` outside test) |
 | `FOREXFACTORY_SYNC_ON_OPENAI` | Refresh calendar before OpenAI prompts (defaults to `FOREXFACTORY_SYNC_ON_FILTER`) |
+| `SHOGUNX_PIP_SIZE` | Price distance per pip (default `1.0` for XAUUSD) |
+| `SHOGUNX_PIP_SIZE_BY_SYMBOL` | Per-symbol overrides, e.g. `XAUUSD=1.0,EURUSD=0.0001` |
 | `RAILS_MASTER_KEY` | Rails credentials key (auto-loaded from `config/master.key` in dev) |
 
 ## Tech stack

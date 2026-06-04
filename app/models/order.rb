@@ -25,6 +25,7 @@ class Order < ApplicationRecord
   validates :entry_price, :stop_loss, :take_profit, :risk_reward,
     presence: true,
     numericality: { greater_than: 0 }
+  validates :tp_leg, numericality: { only_integer: true, in: 1..3 }
   validate :entry_type_matches_action
 
   private

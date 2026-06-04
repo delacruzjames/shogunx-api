@@ -1,7 +1,7 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Execution", type: :request do
-  def create_pending_order(expires_at: nil, created_at: Time.current)
+  def create_pending_order(expires_at: nil, created_at: Time.current, tp_leg: 1)
     snapshot = MarketSnapshot.create!(
       symbol: "XAUUSD",
       timeframe: "H4",
@@ -28,6 +28,7 @@ RSpec.describe "Api::V1::Execution", type: :request do
       stop_loss: 3335,
       take_profit: 3380,
       risk_reward: 2.0,
+      tp_leg: tp_leg,
       status: :pending,
       expires_at: expires_at,
       created_at: created_at
@@ -45,19 +46,20 @@ RSpec.describe "Api::V1::Execution", type: :request do
       )
     end
 
-    it "returns the latest pending order for MT4 execution" do
-      create_pending_order(created_at: 2.hours.ago)
-      latest = create_pending_order(
-        created_at: 1.hour.ago,
+    it "returns the oldest pending order for MT4 execution (TP leg queue)" do
+      oldest = create_pending_order(
+        created_at: 2.hours.ago,
+        tp_leg: 1,
         expires_at: Time.zone.parse("2026-06-03T16:00:00Z")
       )
+      create_pending_order(created_at: 1.hour.ago, tp_leg: 2)
 
       get api_v1_execution_path
 
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body).to eq(
         "action" => "BUY_LIMIT",
-        "order_id" => latest.id,
+        "order_id" => oldest.id,
         "symbol" => "XAUUSD",
         "entry_price" => "3350.0",
         "stop_loss" => "3335.0",

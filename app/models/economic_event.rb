@@ -13,7 +13,7 @@ class EconomicEvent < ApplicationRecord
   scope :usd, -> { where(currency: "USD") }
   scope :from_forexfactory, -> { where(source: "forexfactory") }
 
-  scope :blocking_at, ->(time, buffer: 30.minutes) {
+  scope :blocking_at, ->(time, buffer: NewsFilterService::BUFFER) {
     where(scheduled_at: (time - buffer)..(time + buffer))
   }
 end

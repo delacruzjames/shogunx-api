@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_03_500000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_04_132801) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -81,6 +81,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_03_500000) do
     t.decimal "stop_loss", precision: 15, scale: 5, null: false
     t.decimal "take_profit", precision: 15, scale: 5, null: false
     t.string "ticket"
+    t.integer "tp_leg", default: 1, null: false
     t.bigint "trade_signal_id", null: false
     t.datetime "updated_at", null: false
     t.index ["ticket"], name: "index_orders_on_ticket", unique: true, where: "(ticket IS NOT NULL)"
