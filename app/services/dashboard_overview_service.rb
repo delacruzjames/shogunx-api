@@ -29,14 +29,14 @@ class DashboardOverviewService
   def latest_xauusd_price
     snapshot = MarketSnapshot
       .where(symbol: @symbol)
-      .order(created_at: :desc)
+      .order(created_at: :desc, id: :desc)
       .first
 
     snapshot&.price
   end
 
   def latest_trade_signal
-    TradeSignal.order(created_at: :desc).first
+    TradeSignal.order(created_at: :desc, id: :desc).first
   end
 
   def order_status_label(execution)

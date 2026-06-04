@@ -24,9 +24,9 @@ RSpec.describe "Api::V1::TradeSignals", type: :request do
         "action" => "BUY",
         "confidence" => 77,
         "timeframe" => "H4",
-        "reason" => "Momentum",
-        "created_at"
+        "reason" => "Momentum"
       )
+      expect(body["data"].first).to have_key("created_at")
     end
   end
 end

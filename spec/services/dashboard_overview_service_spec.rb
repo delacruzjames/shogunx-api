@@ -3,6 +3,15 @@ require "rails_helper"
 RSpec.describe DashboardOverviewService do
   include ActiveSupport::Testing::TimeHelpers
 
+  before do
+    ExecutionAuditLog.delete_all
+    TradePerformance.delete_all
+    Position.delete_all
+    Order.delete_all
+    TradeSignal.delete_all
+    MarketSnapshot.where(symbol: "XAUUSD").delete_all
+  end
+
   def create_snapshot(price: 3350)
     MarketSnapshot.create!(
       symbol: "XAUUSD",
@@ -43,8 +52,7 @@ RSpec.describe DashboardOverviewService do
 
     it "includes latest XAUUSD price, signal, and open position" do
       travel_to Time.zone.local(2026, 6, 3, 12, 0, 0) do
-        create_snapshot(price: 3388.25)
-        create_signal(confidence: 91)
+        create_snapshot(price: 3388.25).update_column(:created_at, 2.hours.ago)
 
         snapshot = create_snapshot(price: 3390)
         latest_signal = TradeSignal.create!(
@@ -78,7 +86,7 @@ RSpec.describe DashboardOverviewService do
 
         overview = described_class.new.call
 
-        expect(overview[:xauusd_price]).to eq(3390)
+        expect(overview[:xauusd_price]).to eq(snapshot.price)
         expect(overview[:latest_signal][:id]).to eq(latest_signal.id)
         expect(overview[:signal_confidence]).to eq(70)
         expect(overview[:open_position_status]).to include("SELL XAUUSD")

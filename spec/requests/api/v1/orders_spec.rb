@@ -38,9 +38,9 @@ RSpec.describe "Api::V1::Orders", type: :request do
         "id" => order.id,
         "action" => "BUY",
         "entry_type" => "BUY_LIMIT",
-        "status" => "pending",
-        "expires_at"
+        "status" => "pending"
       )
+      expect(body["data"].first).to have_key("expires_at")
     end
   end
 end

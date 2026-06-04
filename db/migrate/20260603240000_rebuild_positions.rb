@@ -39,8 +39,8 @@ class RebuildPositions < ActiveRecord::Migration[8.1]
       t.decimal "take_profit", precision: 18, scale: 8, null: false
       t.datetime "updated_at", null: false
       t.decimal "volume", precision: 10, scale: 2, null: false
-      t.index ["mt4_ticket"], name: "index_positions_on_mt4_ticket", unique: true
-      t.index ["order_id"], name: "index_positions_on_order_id", unique: true
+      t.index [ :mt4_ticket ], name: "index_positions_on_mt4_ticket", unique: true
+      t.index [ :order_id ], name: "index_positions_on_order_id", unique: true
     end
 
     add_foreign_key :positions, :orders
