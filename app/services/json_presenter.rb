@@ -24,7 +24,22 @@ class JsonPresenter
         confidence: signal.confidence,
         timeframe: signal.timeframe,
         reason: signal.reason,
+        rejection_reason: signal.rejection_reason,
         created_at: signal.created_at.iso8601
+      }
+    end
+
+    def activity_log(log)
+      {
+        id: log.id,
+        category: log.category,
+        level: log.level,
+        message: log.message,
+        metadata: log.metadata,
+        market_snapshot_id: log.market_snapshot_id,
+        trade_signal_id: log.trade_signal_id,
+        order_id: log.order_id,
+        created_at: log.created_at.iso8601
       }
     end
 

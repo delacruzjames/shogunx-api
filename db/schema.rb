@@ -10,9 +10,26 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_04_132801) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_04_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "activity_logs", force: :cascade do |t|
+    t.string "category", null: false
+    t.datetime "created_at", null: false
+    t.string "level", default: "info", null: false
+    t.bigint "market_snapshot_id"
+    t.text "message", null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.bigint "order_id"
+    t.bigint "trade_signal_id"
+    t.datetime "updated_at", null: false
+    t.index ["category"], name: "index_activity_logs_on_category"
+    t.index ["created_at"], name: "index_activity_logs_on_created_at"
+    t.index ["market_snapshot_id"], name: "index_activity_logs_on_market_snapshot_id"
+    t.index ["order_id"], name: "index_activity_logs_on_order_id"
+    t.index ["trade_signal_id"], name: "index_activity_logs_on_trade_signal_id"
+  end
 
   create_table "daily_performances", force: :cascade do |t|
     t.datetime "created_at", null: false
@@ -134,6 +151,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_04_132801) do
     t.index ["market_snapshot_id"], name: "index_trade_signals_on_market_snapshot_id"
   end
 
+  add_foreign_key "activity_logs", "market_snapshots"
+  add_foreign_key "activity_logs", "orders"
+  add_foreign_key "activity_logs", "trade_signals"
   add_foreign_key "execution_audit_logs", "orders"
   add_foreign_key "execution_audit_logs", "positions"
   add_foreign_key "orders", "trade_signals"

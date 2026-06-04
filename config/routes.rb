@@ -11,6 +11,7 @@ Rails.application.routes.draw do
         resources :market_snapshots, only: :index
         resources :trade_signals, only: :index
         resources :orders, only: :index
+        resources :activity_logs, only: :index
         resources :positions, only: %i[index create]
         resources :signals, only: :create
         resource :execution, only: :show, controller: "execution"

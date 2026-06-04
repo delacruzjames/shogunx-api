@@ -109,6 +109,30 @@ RSpec.describe "Api::V1::Signals", type: :request do
       expect(TradeSignal.last.rejection_reason).to eq("duplicate signal action")
     end
 
+    it "accepts nested timeframes JSON like the MT4 EA" do
+      stub_openai_wait(reason: "No actionable setup")
+
+      payload = {
+        symbol: "XAUUSD",
+        timeframe: "H4",
+        timeframes: {
+          "D1" => { price: 4500, rsi: 55, ema50: 4510, ema200: 4490, support: 4480, resistance: 4520 },
+          "H4" => { price: 4505.98, rsi: 45.28, ema50: 4624.54, ema200: 4380.75, support: 4430, resistance: 4490 },
+          "H1" => { price: 4506, rsi: 44, ema50: 4510, ema200: 4495, support: 4490, resistance: 4515 }
+        }
+      }
+
+      expect {
+        post api_v1_signals_path, params: payload.to_json, headers: {
+          "CONTENT_TYPE" => "application/json",
+          "ACCEPT" => "application/json"
+        }
+      }.to change(MarketSnapshot, :count).by(3)
+
+      expect(response).to have_http_status(:ok)
+      expect(MarketSnapshot.find_by!(timeframe: "H4").price).to eq(4505.98)
+    end
+
     it "accepts flat JSON like the MT4 EA (no :signal wrapper)" do
       post api_v1_signals_path,
         params: buy_payload.to_json,
