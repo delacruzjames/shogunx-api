@@ -27,8 +27,11 @@ jobs:
         with:
           ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
 
+      - name: Install Heroku CLI
+        run: curl -fsS https://cli-assets.heroku.com/install.sh | sh
+
       - name: Deploy to Heroku
-        uses: akhileshns/heroku-deploy@v4.2.3
+        uses: akhileshns/heroku-deploy@v3.15.15
         with:
           heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
           heroku_app_name: ${{ env.HEROKU_APP_NAME }}
@@ -40,6 +43,5 @@ jobs:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
           HEROKU_APP_NAME: ${{ env.HEROKU_APP_NAME }}
         run: |
-          curl -fsS https://cli-assets.heroku.com/install.sh | sh
           APP_URL=$(heroku apps:info -a "$HEROKU_APP_NAME" --json | ruby -rjson -e 'puts JSON.parse(STDIN.read).fetch("app").fetch("web_url")')
           curl -fsS "${APP_URL}up"
