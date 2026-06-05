@@ -9,6 +9,7 @@
 
 # Ignore all environment files.
 /.env*
+/deploy/aws/my-aws.env
 
 # Ignore all logfiles and tempfiles.
 /log/*

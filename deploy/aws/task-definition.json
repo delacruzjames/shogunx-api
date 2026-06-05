@@ -1,0 +1,63 @@
+{
+  "family": "shogunx-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "ECS_EXECUTION_ROLE_ARN",
+  "taskRoleArn": "ECS_TASK_ROLE_ARN",
+  "containerDefinitions": [
+    {
+      "name": "web",
+      "image": "AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/shogunx-api:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 80,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "RAILS_ENV", "value": "production" },
+        { "name": "RAILS_LOG_LEVEL", "value": "info" },
+        { "name": "RAILS_HOST", "value": "api.example.com" },
+        { "name": "OPENAI_MODEL", "value": "gpt-4o-mini" },
+        { "name": "FOREXFACTORY_SYNC_ON_FILTER", "value": "true" },
+        { "name": "CORS_ORIGINS", "value": "https://your-dashboard.vercel.app" }
+      ],
+      "secrets": [
+        {
+          "name": "RAILS_MASTER_KEY",
+          "valueFrom": "SECRET_RAILS_MASTER_KEY_ARN"
+        },
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "SECRET_DATABASE_URL_ARN"
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "valueFrom": "SECRET_OPENAI_API_KEY_ARN"
+        },
+        {
+          "name": "SHOGUNX_API_KEY",
+          "valueFrom": "SECRET_SHOGUNX_API_KEY_ARN"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/shogunx-api",
+          "awslogs-region": "AWS_REGION",
+          "awslogs-stream-prefix": "web"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost/up || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 90
+      }
+    }
+  ]
+}
