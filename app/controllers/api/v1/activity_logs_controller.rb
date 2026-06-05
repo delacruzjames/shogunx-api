@@ -8,9 +8,9 @@ module Api
 
         logs = if params[:since_id].present?
                  ActivityLog.after_id(params[:since_id].to_i).limit(limit)
-               else
+        else
                  ActivityLog.recent.limit(limit)
-               end
+        end
 
         render json: {
           data: logs.map { |log| JsonPresenter.activity_log(log) },
