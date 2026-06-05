@@ -30,13 +30,30 @@ jobs:
       - name: Install Heroku CLI
         run: curl -fsS https://cli-assets.heroku.com/install.sh | sh
 
-      - name: Deploy to Heroku
-        uses: akhileshns/heroku-deploy@v3.15.15
-        with:
-          heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
-          heroku_app_name: ${{ env.HEROKU_APP_NAME }}
-          heroku_email: ${{ secrets.HEROKU_EMAIL }}
-          dontuseforce: 1
+      - name: Set container stack
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: heroku stack:set container -a "$HEROKU_APP_NAME"
+
+      - name: Log in to Heroku Container Registry
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: heroku container:login
+
+      - name: Build and push container
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: heroku container:push web -a "$HEROKU_APP_NAME"
+
+      - name: Release container
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: heroku container:release web -a "$HEROKU_APP_NAME"
+
+      - name: Prepare database
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: heroku run bundle exec rails db:prepare -a "$HEROKU_APP_NAME"
 
       - name: Health check
         env:

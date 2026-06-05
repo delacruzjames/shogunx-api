@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1
 # check=error=true
 
-# This Dockerfile is designed for production, not development. Use with Kamal or build'n'run by hand:
+# This Dockerfile is designed for production (Heroku container, Kamal, or local):
 # docker build -t shogunx_api .
-# docker run -d -p 80:80 -e RAILS_MASTER_KEY=<value from config/master.key> --name shogunx_api shogunx_api
+# docker run -d -p 8080:8080 -e PORT=8080 -e RAILS_MASTER_KEY=<value from config/master.key> --name shogunx_api shogunx_api
 
 # For local development, use Dockerfile.dev with docker-compose.dev.yml or `make up`.
 
@@ -69,6 +69,6 @@ COPY --chown=rails:rails --from=build /rails /rails
 # Entrypoint prepares the database.
 ENTRYPOINT ["/rails/bin/docker-entrypoint"]
 
-# Start server via Thruster by default, this can be overwritten at runtime
-EXPOSE 80
+# Heroku sets PORT at runtime; Thruster/Puma bind to ENV["PORT"].
+EXPOSE 8080
 CMD ["./bin/thrust", "./bin/rails", "server"]

@@ -229,48 +229,53 @@ Optional env vars: `APP_PORT` (default `3000`), `DB_PORT` (default `5433`).
 | `SHOGUNX_PIP_SIZE_BY_SYMBOL` | Per-symbol overrides, e.g. `XAUUSD=1.0,EURUSD=0.0001` |
 | `RAILS_MASTER_KEY` | Rails credentials key (auto-loaded from `config/master.key` in dev) |
 
-## Deploy to Heroku
+## Deploy to Heroku (container)
 
-1. Create the app and Postgres (or use the Heroku button with `app.json`):
+Production uses the **container stack** — the existing `Dockerfile` is built and pushed to Heroku Container Registry.
+
+1. Create the app and Postgres:
 
    ```bash
-   heroku create shogunx-api --stack heroku-24
-   heroku buildpacks:add heroku-community/apt
-   heroku buildpacks:add heroku/ruby
-   heroku addons:create heroku-postgresql:essential-0
+   heroku create shogunx-api --stack container
+   heroku addons:create heroku-postgresql:essential-0 -a shogunx-api
    ```
 
 2. Set config vars (secrets are not committed to git):
 
    ```bash
-   heroku config:set RAILS_MASTER_KEY="$(cat config/master.key)"
-   heroku config:set SHOGUNX_API_KEY=your-secret
-   heroku config:set OPENAI_API_KEY=sk-your-key
-   heroku config:set RAILS_HOST=$(heroku info -s | awk -F= '/web_url/ {gsub(/https:\/\//,"",$2); gsub(/\//,"",$2); print $2}')
+   heroku config:set RAILS_MASTER_KEY="$(cat config/master.key)" -a shogunx-api
+   heroku config:set SHOGUNX_API_KEY=your-secret -a shogunx-api
+   heroku config:set OPENAI_API_KEY=sk-your-key -a shogunx-api
+   heroku config:set RAILS_HOST=$(heroku info -s -a shogunx-api | awk -F= '/web_url/ {gsub(/https:\/\//,"",$2); gsub(/\//,"",$2); print $2}')
    # When the dashboard is live, allow browser requests:
-   # heroku config:set CORS_ORIGINS=https://your-dashboard.vercel.app
+   # heroku config:set CORS_ORIGINS=https://your-dashboard.vercel.app -a shogunx-api
    ```
 
 3. Deploy manually (optional):
 
    ```bash
+   heroku container:login
+   heroku container:push web -a shogunx-api
+   heroku container:release web -a shogunx-api
+   heroku run bundle exec rails db:prepare -a shogunx-api
+   ```
+
+   Or push git with `heroku.yml` (Heroku builds the Docker image on their side):
+
+   ```bash
+   heroku git:remote -a shogunx-api
    git push heroku master
    ```
 
-   Migrations run automatically via the `release` phase in `Procfile` (`rails db:prepare`).
-
 4. **GitHub Actions** (`.github/workflows/deploy-heroku.yml`):
 
-   Add repository secrets under **Settings → Secrets and variables → Actions**:
+   Add repository secret **Settings → Secrets and variables → Actions**:
 
    | Secret | Value |
    |--------|-------|
    | `HEROKU_API_KEY` | From [Heroku Account → API Key](https://dashboard.heroku.com/account) |
-   | `HEROKU_EMAIL` | Your Heroku account email |
 
-   After merging to `master`, every push to `master` deploys automatically (CI runs separately on the same push). You can also trigger a deploy manually from the Actions tab.
-
-   **Do not use a GitHub Release to deploy** — merge the Heroku branch into `master` and push; the workflow handles the rest.
+   Pushes to `master`, published releases, and manual runs build the Docker image, push to Container Registry, release, and run `db:prepare`.
 
 5. Verify:
 
@@ -278,10 +283,10 @@ Optional env vars: `APP_PORT` (default `3000`), `DB_PORT` (default `5433`).
    heroku open /up -a shogunx-api
    ```
 
-`DATABASE_URL` is set automatically by Heroku Postgres. Docker/Kamal files remain for local dev; production hosting is Heroku buildpacks (`Procfile`, `Aptfile` for `libvips`).
+`DATABASE_URL` is set automatically by Heroku Postgres. `heroku.yml` defines the Docker build and release-phase migrations.
 
 ## Tech stack
 
 - Ruby 3.3.6 / Rails 8.1
 - PostgreSQL 16
-- Docker for local dev; Heroku for production
+- Docker for local dev; Heroku Container Registry for production
