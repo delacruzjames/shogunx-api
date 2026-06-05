@@ -12,14 +12,15 @@ concurrency:
   group: production-deploy
   cancel-in-progress: false
 
-env:
-  HEROKU_APP_NAME: shogunx-api
-
 jobs:
   deploy:
     name: Deploy to production
     runs-on: ubuntu-latest
     environment: production
+    env:
+      HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+      HEROKU_APP_NAME: shogunx-api
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -34,35 +35,27 @@ jobs:
       - name: Install Heroku CLI
         run: curl -fsS https://cli-assets.heroku.com/install.sh | sh
 
-      - name: Set container stack
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: heroku stack:set container -a "$HEROKU_APP_NAME"
+      - name: Verify Heroku credentials
+        run: |
+          if [ -z "$HEROKU_API_KEY" ]; then
+            echo "::error::HEROKU_API_KEY is not set. Add it under Settings → Secrets and variables → Actions (repository secret), or under the production environment secrets."
+            exit 1
+          fi
+          heroku auth:whoami
 
       - name: Log in to Heroku Container Registry
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: heroku container:login
 
       - name: Build and push container
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: heroku container:push web -a "$HEROKU_APP_NAME"
 
       - name: Release container
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: heroku container:release web -a "$HEROKU_APP_NAME"
 
       - name: Prepare database
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: heroku run bundle exec rails db:prepare -a "$HEROKU_APP_NAME"
 
       - name: Health check
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-          HEROKU_APP_NAME: ${{ env.HEROKU_APP_NAME }}
         run: |
           APP_URL=$(heroku apps:info -a "$HEROKU_APP_NAME" --json | ruby -rjson -e 'puts JSON.parse(STDIN.read).fetch("app").fetch("web_url")')
           curl -fsS "${APP_URL}up"
