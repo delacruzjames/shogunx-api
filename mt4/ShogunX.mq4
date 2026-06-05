@@ -1,10 +1,10 @@
 #property strict
 
 // MT4 WebRequest ONLY allows http port 80 and https port 443 — no :3000 in URLs.
-// Run API with: make upd (maps host port 80 -> container 3000).
-// Whitelist in MT4: http://127.0.0.1  (or http://YOUR_MAC_IP if MT4 is in a VM).
-input string ApiHost                = "127.0.0.1";
-input int    ApiPort                = 80;    // must be 80 (http) or 443 (https)
+// Production API (Heroku): ApiHost below, ApiPort 443, whitelist https://<ApiHost>
+// Local dev: ApiHost 127.0.0.1, ApiPort 80, make upd, whitelist http://127.0.0.1
+input string ApiHost                = "shogunx-api-7cf0de1a1fc6.herokuapp.com";
+input int    ApiPort                = 443;   // 443 = Heroku HTTPS; 80 = local make upd
 input int    IntervalSeconds        = 14400;  // 4 hours (4 * 60 * 60)
 input int    RsiPeriod              = 14;
 input int    EmaFastPeriod          = 50;
@@ -203,9 +203,9 @@ void LogWebRequestError(int err)
 
    if(err == 4060 || err == 5200)
    {
-      hint = " MT4 WebRequest needs port 80 (use ApiPort=80, make upd)."
-             + " Whitelist: " + ApiBase()
-             + " (no :3000). Restart MT4 after adding URL.";
+      hint = " Whitelist in MT4 Expert Advisors: " + ApiBase()
+             + " (no :port). Restart MT4 after adding URL."
+             + " Production: ApiPort=443. Local: ApiPort=80, make upd.";
    }
    else if(err == 4014)
       hint = " Enable 'Allow WebRequest for listed URL' in Expert Advisors options.";
@@ -813,7 +813,7 @@ int OnInit()
 
    if(ApiPort != 80 && ApiPort != 443)
    {
-      Print("[ShogunX] ApiPort must be 80 or 443 for WebRequest. Use make upd (port 80).");
+      Print("[ShogunX] ApiPort must be 80 (local http) or 443 (Heroku https).");
       return(INIT_PARAMETERS_INCORRECT);
    }
 
@@ -850,12 +850,12 @@ int OnInit()
    {
       MessageBox(
          "Cannot reach ShogunX API.\n\n"
-         "MT4 cannot use port 3000 — only 80/443.\n\n"
-         "1) On Mac: make upd  (exposes port 80)\n"
-         "2) Tools -> Options -> Expert Advisors\n"
-         "   Add: " + g_apiBase + "\n"
-         "3) Restart MT4, ApiPort=80, re-attach EA\n"
-         "4) VM? Set ApiHost to Mac IP (make mt4-host)",
+         "1) Tools -> Options -> Expert Advisors\n"
+         "   Enable WebRequest and add:\n"
+         "   " + g_apiBase + "\n"
+         "2) Restart MT4 and re-attach this EA\n"
+         "3) Production: ApiPort=443 (Heroku)\n"
+         "   Local dev: ApiPort=80, make upd, ApiHost=127.0.0.1",
          "ShogunX WebRequest",
          MB_ICONWARNING
       );

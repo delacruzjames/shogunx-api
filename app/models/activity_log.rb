@@ -1,8 +1,8 @@
 class ActivityLog < ApplicationRecord
   CATEGORIES = %w[snapshot analysis risk orders execution system].freeze
   LEVELS = %w[info warn success error].freeze
-  DEFAULT_LIMIT = 100
-  MAX_LIMIT = 200
+  DEFAULT_LIMIT = 20
+  MAX_LIMIT = 100
 
   belongs_to :market_snapshot, optional: true
   belongs_to :trade_signal, optional: true
