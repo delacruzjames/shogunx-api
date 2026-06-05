@@ -275,7 +275,9 @@ Production uses the **container stack** — the existing `Dockerfile` is built a
    |--------|-------|
    | `HEROKU_API_KEY` | From [Heroku Account → API Key](https://dashboard.heroku.com/account) |
 
-   Pushes to `master`, published releases, and manual runs build the Docker image, push to Container Registry, release, and run `db:prepare`.
+   **Production deploy** runs when you **publish a GitHub Release** (tag the release on `master`). The workflow checks out that tag, builds the Docker image, pushes to Heroku Container Registry, releases, and runs `db:prepare`. You can also trigger a production deploy manually from the Actions tab.
+
+   Pushes to `master` alone do **not** deploy — only releases (or manual runs) do.
 
 5. Verify:
 

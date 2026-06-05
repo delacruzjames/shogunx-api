@@ -3,29 +3,33 @@ name: Deploy to Heroku
 on:
   release:
     types: [published]
-  push:
-    branches: [master]
-    paths-ignore:
-      - "**.md"
-      - "mt4/**"
-      - "spec/**"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
 
 env:
   HEROKU_APP_NAME: shogunx-api
 
 jobs:
   deploy:
-    name: Deploy
+    name: Deploy to production
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+
+      - name: Deploy target
+        run: |
+          echo "Deploying to production (Heroku app: $HEROKU_APP_NAME)"
+          echo "Ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}"
 
       - name: Install Heroku CLI
         run: curl -fsS https://cli-assets.heroku.com/install.sh | sh
