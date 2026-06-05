@@ -268,7 +268,9 @@ Optional env vars: `APP_PORT` (default `3000`), `DB_PORT` (default `5433`).
    | `HEROKU_API_KEY` | From [Heroku Account → API Key](https://dashboard.heroku.com/account) |
    | `HEROKU_EMAIL` | Your Heroku account email |
 
-   Production deploy runs when you **publish a GitHub Release** (same as the old AWS flow). You can also trigger it manually from the Actions tab (`workflow_dispatch`).
+   After merging to `master`, every push to `master` deploys automatically (CI runs separately on the same push). You can also trigger a deploy manually from the Actions tab.
+
+   **Do not use a GitHub Release to deploy** — merge the Heroku branch into `master` and push; the workflow handles the rest.
 
 5. Verify:
 
