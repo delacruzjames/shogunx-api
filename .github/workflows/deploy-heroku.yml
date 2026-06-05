@@ -1,0 +1,42 @@
+name: Deploy to Heroku
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - "**.md"
+      - "mt4/**"
+      - "spec/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HEROKU_APP_NAME: shogunx-api
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Deploy to Heroku
+        uses: akhileshns/heroku-deploy@v4.2.3
+        with:
+          heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
+          heroku_app_name: ${{ env.HEROKU_APP_NAME }}
+          heroku_email: ${{ secrets.HEROKU_EMAIL }}
+          branch: master
+          dontuseforce: 1
+
+      - name: Health check
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          HEROKU_APP_NAME: ${{ env.HEROKU_APP_NAME }}
+        run: |
+          curl -fsS https://cli-assets.heroku.com/install.sh | sh
+          APP_URL=$(heroku apps:info -a "$HEROKU_APP_NAME" --json | ruby -rjson -e 'puts JSON.parse(STDIN.read).fetch("app").fetch("web_url")')
+          curl -fsS "${APP_URL}up"

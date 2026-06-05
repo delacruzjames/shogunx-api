@@ -1,7 +1,5 @@
 #!/bin/bash -e
 
-# Web containers should not auto-migrate; run migrations via a one-off ECS task
-# (see deploy/aws/migrate.sh) before deploying new images.
 if [ "${1}" = "./bin/rails" ] && [ "${2}" = "server" ]; then
   rm -f tmp/pids/server.pid
 fi

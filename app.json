@@ -1,0 +1,24 @@
+{
+  "name": "shogunx-api",
+  "description": "ShogunX Rails API",
+  "stack": "heroku-24",
+  "buildpacks": [
+    { "url": "heroku-community/apt" },
+    { "url": "heroku/ruby" }
+  ],
+  "env": {
+    "RAILS_ENV": "production",
+    "RAILS_LOG_LEVEL": "info",
+    "OPENAI_MODEL": "gpt-4o-mini",
+    "FOREXFACTORY_SYNC_ON_FILTER": "true"
+  },
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  },
+  "addons": [
+    "heroku-postgresql:essential-0"
+  ]
+}
