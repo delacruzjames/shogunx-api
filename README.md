@@ -273,7 +273,7 @@ Production uses the **container stack** — the existing `Dockerfile` is built a
 
    | Secret | Value |
    |--------|-------|
-   | `HEROKU_API_KEY` | From [Heroku Account → API Key](https://dashboard.heroku.com/account) |
+   | `HEROKU_API_KEY` | From [Heroku Account → API Key](https://dashboard.heroku.com/account) — add as a **repository** secret, or under the **production** environment if you use environment protection rules |
 
    **Production deploy** runs when you **publish a GitHub Release** (tag the release on `master`). The workflow checks out that tag, builds the Docker image, pushes to Heroku Container Registry, releases, and runs `db:prepare`. You can also trigger a production deploy manually from the Actions tab.
 
