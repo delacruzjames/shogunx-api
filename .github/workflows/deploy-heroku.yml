@@ -1,6 +1,8 @@
 name: Deploy to Heroku
 
 on:
+  release:
+    types: [published]
   push:
     branches: [master]
     paths-ignore:
@@ -22,6 +24,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
 
       - name: Deploy to Heroku
         uses: akhileshns/heroku-deploy@v4.2.3
@@ -29,7 +33,6 @@ jobs:
           heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
           heroku_app_name: ${{ env.HEROKU_APP_NAME }}
           heroku_email: ${{ secrets.HEROKU_EMAIL }}
-          branch: master
           dontuseforce: 1
 
       - name: Health check
