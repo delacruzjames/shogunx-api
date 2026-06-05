@@ -1,42 +1,68 @@
 name: Deploy to Heroku
 
 on:
-  push:
-    branches: [master]
-    paths-ignore:
-      - "**.md"
-      - "mt4/**"
-      - "spec/**"
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
 
 env:
   HEROKU_APP_NAME: shogunx-api
 
 jobs:
   deploy:
-    name: Deploy
+    name: Deploy to production
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-
-      - name: Deploy to Heroku
-        uses: akhileshns/heroku-deploy@v4.2.3
         with:
-          heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
-          heroku_app_name: ${{ env.HEROKU_APP_NAME }}
-          heroku_email: ${{ secrets.HEROKU_EMAIL }}
-          branch: master
-          dontuseforce: 1
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+
+      - name: Deploy target
+        run: |
+          echo "Deploying to production (Heroku app: $HEROKU_APP_NAME)"
+          echo "Ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}"
+
+      - name: Install Heroku CLI
+        run: curl -fsS https://cli-assets.heroku.com/install.sh | sh
+
+      - name: Set container stack
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: heroku stack:set container -a "$HEROKU_APP_NAME"
+
+      - name: Log in to Heroku Container Registry
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: heroku container:login
+
+      - name: Build and push container
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: heroku container:push web -a "$HEROKU_APP_NAME"
+
+      - name: Release container
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: heroku container:release web -a "$HEROKU_APP_NAME"
+
+      - name: Prepare database
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: heroku run bundle exec rails db:prepare -a "$HEROKU_APP_NAME"
 
       - name: Health check
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
           HEROKU_APP_NAME: ${{ env.HEROKU_APP_NAME }}
         run: |
-          curl -fsS https://cli-assets.heroku.com/install.sh | sh
           APP_URL=$(heroku apps:info -a "$HEROKU_APP_NAME" --json | ruby -rjson -e 'puts JSON.parse(STDIN.read).fetch("app").fetch("web_url")')
           curl -fsS "${APP_URL}up"
