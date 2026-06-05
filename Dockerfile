@@ -69,6 +69,7 @@ COPY --chown=rails:rails --from=build /rails /rails
 # Entrypoint prepares the database.
 ENTRYPOINT ["/rails/bin/docker-entrypoint"]
 
-# Heroku sets PORT at runtime; Thruster/Puma bind to ENV["PORT"].
+# Heroku sets PORT at runtime; Puma binds to ENV["PORT"] (see config/puma.rb).
+# Thruster defaults to :80 and fails as the non-root container user on Heroku.
 EXPOSE 8080
-CMD ["./bin/thrust", "./bin/rails", "server"]
+CMD ["./bin/rails", "server"]
