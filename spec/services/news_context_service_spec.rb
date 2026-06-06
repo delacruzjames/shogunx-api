@@ -19,7 +19,7 @@ RSpec.describe NewsContextService do
       now = Time.zone.parse("2026-06-03 12:00:00")
       create_event(scheduled_at: now + 2.days)
 
-      result = described_class.new(at: now, sync_calendar: false).call
+      result = described_class.new(at: now).call
 
       expect(result[:in_blackout]).to be(false)
       expect(result[:blackout_reason]).to be_nil
@@ -31,23 +31,18 @@ RSpec.describe NewsContextService do
       now = Time.zone.parse("2026-06-03 12:00:00")
       create_event(scheduled_at: now + 20.minutes)
 
-      result = described_class.new(at: now, sync_calendar: false).call
+      result = described_class.new(at: now).call
 
       expect(result[:in_blackout]).to be(true)
       expect(result[:blackout_reason]).to include("Non-Farm Payrolls")
     end
 
-    it "syncs ForexFactory before building context when enabled" do
-      sync = instance_double(
-        ForexFactoryCalendarSyncService,
-        call: ForexFactoryCalendarSyncService::Result.new(success?: true, imported_count: 0, errors: [])
-      )
-      allow(ForexFactoryCalendarSyncService).to receive(:new).and_return(sync)
+    it "reads cached economic_events without calling ForexFactory" do
+      allow(ForexFactoryCalendarSyncService).to receive(:new)
 
-      described_class.new(sync_calendar: true).call
+      described_class.new.call
 
-      expect(ForexFactoryCalendarSyncService).to have_received(:new)
-      expect(sync).to have_received(:call)
+      expect(ForexFactoryCalendarSyncService).not_to have_received(:new)
     end
   end
 
@@ -56,7 +51,7 @@ RSpec.describe NewsContextService do
       now = Time.zone.parse("2026-06-03 12:00:00")
       create_event(scheduled_at: now + 2.hours, title: "CPI m/m")
 
-      text = described_class.new(at: now, sync_calendar: false).format_for_prompt
+      text = described_class.new(at: now).format_for_prompt
 
       expect(text).to include(NewsContextService::CALENDAR_URL)
       expect(text).to include("trading_blackout: clear")

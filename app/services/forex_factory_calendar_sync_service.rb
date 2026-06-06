@@ -2,7 +2,7 @@ class ForexFactoryCalendarSyncService
   Result = Struct.new(:success?, :imported_count, :errors, keyword_init: true)
 
   SYNC_CACHE_KEY = "forexfactory_calendar_synced_at"
-  MIN_SYNC_INTERVAL = 5.minutes
+  MIN_SYNC_INTERVAL = 15.minutes
 
   def initialize(client: ForexFactory::CalendarClient.new, force: false)
     @client = client

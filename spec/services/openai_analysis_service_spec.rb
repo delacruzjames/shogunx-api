@@ -25,7 +25,7 @@ RSpec.describe OpenaiAnalysisService do
   end
 
   def empty_news_context
-    NewsContextService.new(sync_calendar: false, events: EconomicEvent.none)
+    NewsContextService.new(events: EconomicEvent.none)
   end
 
   describe "#call" do
@@ -148,7 +148,6 @@ RSpec.describe OpenaiAnalysisService do
         chat_client = openai_json_response(action: "WAIT", confidence: 0, reason: "News risk")
         news_context = NewsContextService.new(
           at: now,
-          sync_calendar: false,
           events: EconomicEvent.where(id: event.id)
         )
 
