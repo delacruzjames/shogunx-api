@@ -163,11 +163,13 @@ Common commands: `make logs`, `make console`, `make test`, `make down`.
 
 ### News filter (ForexFactory)
 
-`NewsFilterService` syncs high-impact USD events from the [ForexFactory calendar](https://nfs.faireconomy.media/ff_calendar_thisweek.json) and blocks new trades from **60 minutes before** through **60 minutes after** each release (aligned with the Brain prompt). `RiskRuleService` surfaces the rejection as `high impact USD news: <event title>`.
+`NewsFilterService` reads high-impact USD events from the cached `economic_events` table (synced by `NewsSyncJob`) and blocks new trades from **60 minutes before** through **60 minutes after** each release (aligned with the Brain prompt). `RiskRuleService` surfaces the rejection as `high impact USD news: <event title>`.
 
 `OpenaiAnalysisService` includes the same calendar context in every Brain prompt via `NewsContextService` (blackout status + upcoming USD high-impact releases), so the model can prefer **WAIT** near news even before the risk gate runs.
 
-Background sync: `ForexFactoryCalendarSyncJob` (respects a 5-minute throttle). Set `FOREXFACTORY_SYNC_ON_FILTER=true` to refresh on every risk check (default in production). `FOREXFACTORY_SYNC_ON_OPENAI` controls sync before OpenAI analysis (defaults to the same value as `FOREXFACTORY_SYNC_ON_FILTER`).
+Background sync: `NewsSyncJob` runs every **15 minutes** via Solid Queue and stores high-impact USD releases in `economic_events`. Signal requests read from that cache only — ForexFactory is never scraped per request.
+
+Set `SOLID_QUEUE_IN_PUMA=true` on Heroku (single dyno) so Puma supervises the job scheduler.
 
 ### Three take-profit orders
 
@@ -223,8 +225,7 @@ Optional env vars: `APP_PORT` (default `3000`), `DB_PORT` (default `5433`).
 | `OPENAI_API_KEY` | OpenAI API key for `OpenaiAnalysisService` (required for live analysis) |
 | `OPENAI_MODEL` | Optional model override (default `gpt-4o-mini`) |
 | `FOREXFACTORY_CALENDAR_URL` | Optional override (default `https://nfs.faireconomy.media/ff_calendar_thisweek.json`) |
-| `FOREXFACTORY_SYNC_ON_FILTER` | Refresh calendar before risk checks (default `true` outside test) |
-| `FOREXFACTORY_SYNC_ON_OPENAI` | Refresh calendar before OpenAI prompts (defaults to `FOREXFACTORY_SYNC_ON_FILTER`) |
+| `SOLID_QUEUE_IN_PUMA` | Run Solid Queue inside Puma (required on Heroku single-dyno deploys) |
 | `SHOGUNX_PIP_SIZE` | Price distance per pip (default `1.0` for XAUUSD) |
 | `SHOGUNX_PIP_SIZE_BY_SYMBOL` | Per-symbol overrides, e.g. `XAUUSD=1.0,EURUSD=0.0001` |
 | `RAILS_MASTER_KEY` | Rails credentials key (auto-loaded from `config/master.key` in dev) |

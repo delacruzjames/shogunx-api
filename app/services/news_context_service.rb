@@ -4,15 +4,12 @@ class NewsContextService
   MAX_EVENTS = 8
   BUFFER = NewsFilterService::BUFFER
 
-  def initialize(at: Time.current, sync_calendar: default_sync_calendar?, events: nil)
+  def initialize(at: Time.current, events: nil)
     @at = at
-    @sync_calendar = sync_calendar
     @events = events
   end
 
   def call
-    refresh_calendar if @sync_calendar
-
     {
       calendar_url: CALENDAR_URL,
       in_blackout: in_blackout?,
@@ -48,12 +45,6 @@ class NewsContextService
   end
 
   private
-
-  def refresh_calendar
-    ForexFactoryCalendarSyncService.new.call
-  rescue ForexFactory::CalendarClient::FetchError => e
-    Rails.logger.warn("[NewsContextService] ForexFactory sync failed: #{e.message}")
-  end
 
   def in_blackout?
     blocking_events.exists?
@@ -119,11 +110,5 @@ class NewsContextService
 
   def within_blackout_window?(scheduled_at)
     scheduled_at.between?(@at - BUFFER, @at + BUFFER)
-  end
-
-  def default_sync_calendar?
-    ActiveModel::Type::Boolean.new.cast(
-      ENV.fetch("FOREXFACTORY_SYNC_ON_OPENAI", ENV.fetch("FOREXFACTORY_SYNC_ON_FILTER", !Rails.env.test?))
-    )
   end
 end

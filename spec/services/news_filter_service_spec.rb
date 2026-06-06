@@ -13,7 +13,7 @@ RSpec.describe NewsFilterService do
 
   describe "#call" do
     it "allows trading when there is no high-impact USD news" do
-      result = described_class.new(sync_calendar: false).call
+      result = described_class.new.call
 
       expect(result).to eq(allowed: true, reason: "clear of high impact news")
     end
@@ -22,7 +22,7 @@ RSpec.describe NewsFilterService do
       now = Time.zone.parse("2026-06-03 12:00:00")
       create_high_impact_event(scheduled_at: now + 60.minutes)
 
-      result = described_class.new(at: now, sync_calendar: false).call
+      result = described_class.new(at: now).call
 
       expect(result[:allowed]).to be(false)
       expect(result[:reason]).to eq("high impact USD news: Test Event")
@@ -32,7 +32,7 @@ RSpec.describe NewsFilterService do
       now = Time.zone.parse("2026-06-03 12:00:00")
       create_high_impact_event(scheduled_at: now - 60.minutes)
 
-      result = described_class.new(at: now, sync_calendar: false).call
+      result = described_class.new(at: now).call
 
       expect(result[:allowed]).to be(false)
       expect(result[:reason]).to eq("high impact USD news: Test Event")
@@ -42,7 +42,7 @@ RSpec.describe NewsFilterService do
       now = Time.zone.parse("2026-06-03 12:00:00")
       create_high_impact_event(scheduled_at: now)
 
-      result = described_class.new(at: now, sync_calendar: false).call
+      result = described_class.new(at: now).call
 
       expect(result[:allowed]).to be(false)
       expect(result[:reason]).to eq("high impact USD news: Test Event")
@@ -52,7 +52,7 @@ RSpec.describe NewsFilterService do
       now = Time.zone.parse("2026-06-03 12:00:00")
       create_high_impact_event(scheduled_at: now + 61.minutes)
 
-      result = described_class.new(at: now, sync_calendar: false).call
+      result = described_class.new(at: now).call
 
       expect(result[:allowed]).to be(true)
     end
@@ -61,7 +61,7 @@ RSpec.describe NewsFilterService do
       now = Time.zone.parse("2026-06-03 12:00:00")
       create_high_impact_event(scheduled_at: now, impact: "medium")
 
-      result = described_class.new(at: now, sync_calendar: false).call
+      result = described_class.new(at: now).call
 
       expect(result[:allowed]).to be(true)
     end
@@ -71,22 +71,17 @@ RSpec.describe NewsFilterService do
       event = create_high_impact_event(scheduled_at: now)
       event.update_column(:currency, "EUR")
 
-      result = described_class.new(at: now, sync_calendar: false).call
+      result = described_class.new(at: now).call
 
       expect(result[:allowed]).to be(true)
     end
 
-    it "syncs ForexFactory before checking the calendar" do
-      sync = instance_double(
-        ForexFactoryCalendarSyncService,
-        call: ForexFactoryCalendarSyncService::Result.new(success?: true, imported_count: 0, errors: [])
-      )
-      allow(ForexFactoryCalendarSyncService).to receive(:new).and_return(sync)
+    it "reads cached economic_events without calling ForexFactory" do
+      allow(ForexFactoryCalendarSyncService).to receive(:new)
 
-      described_class.new(sync_calendar: true).call
+      described_class.new.call
 
-      expect(ForexFactoryCalendarSyncService).to have_received(:new)
-      expect(sync).to have_received(:call)
+      expect(ForexFactoryCalendarSyncService).not_to have_received(:new)
     end
   end
 end
