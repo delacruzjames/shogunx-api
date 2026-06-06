@@ -21,8 +21,21 @@ default: &default
 
 
 development:
-  <<: *default
-  database: shogunx_api_development
+  primary:
+    <<: *default
+    <% if ENV["DATABASE_URL"] %>
+    url: <%= ENV["DATABASE_URL"] %>
+    <% else %>
+    database: shogunx_api_development
+    <% end %>
+  queue:
+    <<: *default
+    <% if ENV["DATABASE_URL"] %>
+    url: <%= ENV["DATABASE_URL"] %>
+    <% else %>
+    database: shogunx_api_development
+    <% end %>
+    migrations_paths: db/queue_migrate
 
   # The specified database role being used to connect to PostgreSQL.
   # To create additional roles in PostgreSQL see `$ createuser --help`.
@@ -55,8 +68,21 @@ development:
 # re-generated from your development database when you run "rake".
 # Do not set this db to the same as development or production.
 test:
-  <<: *default
-  database: shogunx_api_test
+  primary:
+    <<: *default
+    <% if ENV["DATABASE_URL"] %>
+    url: <%= ENV["DATABASE_URL"] %>
+    <% else %>
+    database: shogunx_api_test
+    <% end %>
+  queue:
+    <<: *default
+    <% if ENV["DATABASE_URL"] %>
+    url: <%= ENV["DATABASE_URL"] %>
+    <% else %>
+    database: shogunx_api_test
+    <% end %>
+    migrations_paths: db/queue_migrate
 
 # As with config/credentials.yml, you never want to store sensitive information,
 # like your database password, in your source code. If your source code is
