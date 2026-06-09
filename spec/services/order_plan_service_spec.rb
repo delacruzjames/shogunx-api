@@ -61,6 +61,51 @@ RSpec.describe OrderPlanService do
         risk_reward: 2.0
       )
     end
+
+    it "uses H1 resistance and caps entry distance in tactical mode" do
+      snapshots = create_multi_timeframe_snapshots(
+        price: 4334.0,
+        rsi: 45,
+        ema50: 4470,
+        ema200: 4490,
+        support: 4268.39,
+        resistance: 4515.34
+      )
+      h1 = snapshots.find { |snapshot| snapshot.timeframe == "H1" }
+      h1.update!(support: 4312.82, resistance: 4351.44)
+
+      signal = TradeSignal.create!(
+        market_snapshot: snapshots.find { |snapshot| snapshot.timeframe == "H4" },
+        symbol: "XAUUSD",
+        action: "SELL",
+        confidence: 70,
+        timeframe: "H1",
+        reason: "Tactical sell"
+      )
+
+      original_mode = ENV["SHOGUNX_TRADING_MODE"]
+      original_max = ENV["SHOGUNX_MAX_ENTRY_PIPS"]
+      ENV["SHOGUNX_TRADING_MODE"] = "tactical"
+      ENV["SHOGUNX_MAX_ENTRY_PIPS"] = "40"
+      TradingMode.reset!
+
+      plan = described_class.new(signal).call
+
+      expect(plan[:entry_price]).to eq(4351.44)
+      expect(plan[:entry_type]).to eq("SELL_LIMIT")
+    ensure
+      if original_mode.nil?
+        ENV.delete("SHOGUNX_TRADING_MODE")
+      else
+        ENV["SHOGUNX_TRADING_MODE"] = original_mode
+      end
+      if original_max.nil?
+        ENV.delete("SHOGUNX_MAX_ENTRY_PIPS")
+      else
+        ENV["SHOGUNX_MAX_ENTRY_PIPS"] = original_max
+      end
+      TradingMode.reset!
+    end
   end
 
   describe "#take_profit_legs" do

@@ -3,6 +3,9 @@ class OrderPlanService
   PRICE_PRECISION = 5
   RISK_REWARD_PRECISION = 2
   DEFAULT_TP_PIPS = [ 20, 30, 40 ].freeze
+  DEFAULT_ENTRY_TIMEFRAME = MarketSnapshot::PRIMARY_TIMEFRAME
+  TACTICAL_ENTRY_TIMEFRAME = "H1"
+  DEFAULT_MAX_ENTRY_PIPS = 40
   # XAUUSD: 1 pip = $1 on price (e.g. 3350.00 → 3351.00). Override via SHOGUNX_PIP_SIZE.
   DEFAULT_PIP_SIZE = 1.0
   PIP_SIZE_BY_SYMBOL = {
@@ -92,7 +95,7 @@ class OrderPlanService
   private
 
   def price_levels
-    snapshot = @trade_signal.market_snapshot
+    snapshot = level_snapshot
     support = snapshot&.support&.to_f
     resistance = snapshot&.resistance&.to_f
 
@@ -104,8 +107,28 @@ class OrderPlanService
     {
       support: support,
       resistance: resistance,
-      buffer: buffer
+      buffer: buffer,
+      level_timeframe: snapshot.timeframe
     }
+  end
+
+  def level_snapshot
+    timeframe = entry_level_timeframe
+    base = @trade_signal.market_snapshot
+    return base if base.timeframe == timeframe
+
+    MarketSnapshot
+      .where(symbol: @trade_signal.symbol, timeframe: timeframe)
+      .where(created_at: (base.created_at - 2.minutes)..(base.created_at + 2.minutes))
+      .order(created_at: :desc)
+      .first || base
+  end
+
+  def entry_level_timeframe
+    configured = ENV["SHOGUNX_ENTRY_TIMEFRAME"].presence
+    return configured if configured.present?
+
+    TradingMode.current.tactical? ? TACTICAL_ENTRY_TIMEFRAME : DEFAULT_ENTRY_TIMEFRAME
   end
 
   def build_plan(levels)
@@ -117,12 +140,10 @@ class OrderPlanService
       entry_price = levels[:support]
       stop_loss = levels[:support] - levels[:buffer]
       max_take_profit = levels[:resistance]
-      entry_type = entry_type_for_buy(entry_price, market_price)
     when "SELL"
       entry_price = levels[:resistance]
       stop_loss = levels[:resistance] + levels[:buffer]
       max_take_profit = levels[:support]
-      entry_type = entry_type_for_sell(entry_price, market_price)
     else
       return nil
     end
@@ -130,6 +151,8 @@ class OrderPlanService
     entry_price = round_price(entry_price)
     stop_loss = round_price(stop_loss)
     max_take_profit = round_price(max_take_profit)
+    entry_price = cap_entry_to_market(@trade_signal.action, entry_price, market_price)
+    entry_type = entry_type_for(@trade_signal.action, entry_price, market_price)
     reward_ratio = risk_reward(
       action: @trade_signal.action,
       entry_price: entry_price,
@@ -220,6 +243,33 @@ class OrderPlanService
     return nil if price.nil? || price <= 0
 
     price
+  end
+
+  def cap_entry_to_market(action, entry_price, market_price)
+    return entry_price unless TradingMode.current.tactical?
+
+    symbol = @trade_signal.symbol.to_s.upcase
+    max_offset = max_entry_pips * pip_size_for(symbol)
+
+    case action
+    when "SELL"
+      round_price([ entry_price, market_price + max_offset ].min)
+    when "BUY"
+      round_price([ entry_price, market_price - max_offset ].max)
+    else
+      entry_price
+    end
+  end
+
+  def max_entry_pips
+    ENV.fetch("SHOGUNX_MAX_ENTRY_PIPS", DEFAULT_MAX_ENTRY_PIPS).to_f
+  end
+
+  def entry_type_for(action, entry_price, market_price)
+    case action
+    when "BUY" then entry_type_for_buy(entry_price, market_price)
+    when "SELL" then entry_type_for_sell(entry_price, market_price)
+    end
   end
 
   def entry_type_for_buy(entry_price, market_price)
