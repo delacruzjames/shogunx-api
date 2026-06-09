@@ -54,11 +54,16 @@ class OrderPlanService
     )
   end
 
+  def tp_pips_for(_symbol)
+    raw = ENV.fetch("SHOGUNX_TP_PIPS", DEFAULT_TP_PIPS.join(","))
+    raw.split(",").filter_map { |value| Integer(value.strip, exception: false) }.select(&:positive?)
+  end
+
   def take_profit_legs(plan)
     symbol = @trade_signal.symbol.to_s.upcase
     pip_size = pip_size_for(symbol)
 
-    DEFAULT_TP_PIPS.filter_map.with_index(1) do |pips, index|
+    tp_pips_for(symbol).filter_map.with_index(1) do |pips, index|
       take_profit = take_profit_for_pips(
         action: plan[:action],
         entry_price: plan[:entry_price],
