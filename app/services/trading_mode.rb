@@ -1,8 +1,10 @@
 class TradingMode
   MODES = %w[conservative tactical].freeze
   DEFAULT = "conservative"
-  ANALYSIS_TIMEFRAME = "H4"
+  ANALYSIS_TIMEFRAME = "H1"
   D1_DISAGREEMENT_PENALTY = 10
+  TACTICAL_BASE_CONFIDENCE = 80
+  D1_AGREEMENT_BONUS = 5
   TACTICAL_REASON = "Tactical trade against higher timeframe (D1) trend."
 
   CONSERVATIVE_RULES = <<~RULES.strip
@@ -36,8 +38,9 @@ class TradingMode
   TACTICAL_RULES = <<~RULES.strip
     Rules:
 
+    - You are a daily XAUUSD trader looking for intraday setups, not weekly swing holds.
     - Never force a trade.
-    - Allow BUY or SELL when H4 and H1 trends are aligned, even if D1 disagrees.
+    - Prefer actionable BUY or SELL when H4 and H1 trends are aligned, even if D1 disagrees.
     - If H4 and H1 are not aligned, return WAIT.
     - If confidence is below 70, return WAIT.
     - Avoid trades within 60 minutes before major USD news.
@@ -50,10 +53,10 @@ class TradingMode
     Confidence Guide:
 
     90-100:
-    Strong H4 and H1 alignment with excellent setup quality.
+    Strong H4 and H1 alignment with excellent intraday setup quality.
 
     70-89:
-    Good H4/H1 setup with acceptable risk.
+    Good H4/H1 daily setup with acceptable risk.
 
     50-69:
     Weak or conflicting lower-timeframe signals.
@@ -95,6 +98,34 @@ class TradingMode
     conservative? ? CONSERVATIVE_RULES : TACTICAL_RULES
   end
 
+  def infer_daily_signal(summary, min_confidence:)
+    return nil unless tactical?
+
+    trends = timeframe_trends(summary)
+    action = inferred_action(trends)
+    return nil if action.nil?
+
+    analysis = {
+      action: action,
+      confidence: TACTICAL_BASE_CONFIDENCE,
+      timeframe: ANALYSIS_TIMEFRAME,
+      reason: "Daily #{action} setup: H4 and H1 trends aligned"
+    }
+
+    if d1_disagrees?(trends["D1"], action)
+      analysis = analysis.merge(
+        confidence: analysis[:confidence] - D1_DISAGREEMENT_PENALTY,
+        reason: append_tactical_reason(analysis[:reason])
+      )
+    elsif aligned?(trends, %w[D1], trend_for_action(action))
+      analysis = analysis.merge(confidence: analysis[:confidence] + D1_AGREEMENT_BONUS)
+    end
+
+    return nil if analysis[:confidence] < min_confidence
+
+    analysis
+  end
+
   def apply_tradable_analysis(analysis, summary, min_confidence:)
     direction = trend_for_action(analysis[:action])
     trends = timeframe_trends(summary)
@@ -125,6 +156,13 @@ class TradingMode
 
   def trend_for_action(action)
     action == "BUY" ? "bullish" : "bearish"
+  end
+
+  def inferred_action(trends)
+    return "SELL" if aligned?(trends, %w[H4 H1], "bearish")
+    return "BUY" if aligned?(trends, %w[H4 H1], "bullish")
+
+    nil
   end
 
   def aligned?(trends, timeframes, direction)

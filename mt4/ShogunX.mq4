@@ -5,7 +5,7 @@
 // Local dev: ApiHost 127.0.0.1, ApiPort 80, make upd, whitelist http://127.0.0.1
 input string ApiHost                = "shogunx-api-7cf0de1a1fc6.herokuapp.com";
 input int    ApiPort                = 443;   // 443 = Heroku HTTPS; 80 = local make upd
-input int    IntervalSeconds        = 14400;  // 4 hours (4 * 60 * 60)
+input int    IntervalSeconds        = 3600;   // 1 hour — daily trading cadence (was 14400 / 4h)
 input int    RsiPeriod              = 14;
 input int    EmaFastPeriod          = 50;
 input int    EmaSlowPeriod          = 200;

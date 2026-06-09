@@ -9,7 +9,7 @@ module OpenaiTestHelpers
     instance_double(Openai::ChatClient, chat: response)
   end
 
-  def openai_json_response(action:, confidence:, timeframe: "H4", reason: "Mocked OpenAI analysis")
+  def openai_json_response(action:, confidence:, timeframe: "H1", reason: "Mocked OpenAI analysis")
     openai_chat_client(
       content: {
         action: action,

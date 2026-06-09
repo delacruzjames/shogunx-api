@@ -134,4 +134,44 @@ RSpec.describe TradingMode do
       end
     end
   end
+
+  describe "#infer_daily_signal" do
+    let(:min_confidence) { 70 }
+
+    it "returns nil in conservative mode" do
+      summary = summary_with_trends(d1: "bullish", h4: "bearish", h1: "bearish")
+      mode = described_class.new("conservative")
+
+      expect(mode.infer_daily_signal(summary, min_confidence: min_confidence)).to be_nil
+    end
+
+    it "infers SELL when H4 and H1 are bearish and D1 disagrees" do
+      summary = summary_with_trends(d1: "bullish", h4: "bearish", h1: "bearish")
+      mode = described_class.new("tactical")
+
+      result = mode.infer_daily_signal(summary, min_confidence: min_confidence)
+
+      expect(result[:action]).to eq("SELL")
+      expect(result[:confidence]).to eq(70)
+      expect(result[:timeframe]).to eq("H1")
+      expect(result[:reason]).to include(TradingMode::TACTICAL_REASON)
+    end
+
+    it "infers BUY with a D1 agreement bonus" do
+      summary = summary_with_trends(d1: "bullish", h4: "bullish", h1: "bullish")
+      mode = described_class.new("tactical")
+
+      result = mode.infer_daily_signal(summary, min_confidence: min_confidence)
+
+      expect(result[:action]).to eq("BUY")
+      expect(result[:confidence]).to eq(85)
+    end
+
+    it "returns nil when H4 and H1 are not aligned" do
+      summary = summary_with_trends(d1: "bearish", h4: "bearish", h1: "bullish")
+      mode = described_class.new("tactical")
+
+      expect(mode.infer_daily_signal(summary, min_confidence: min_confidence)).to be_nil
+    end
+  end
 end

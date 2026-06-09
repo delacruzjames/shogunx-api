@@ -6,6 +6,7 @@ class RiskRuleService
 
   RULES = [
     :high_impact_news,
+    :pending_orders_exist,
     :duplicate_signal_action,
     :existing_open_position,
     :confidence_below_threshold,
@@ -27,6 +28,12 @@ class RiskRuleService
   end
 
   private
+
+  def pending_orders_exist
+    return nil unless pending_orders_for_symbol.exists?
+
+    "pending orders already exist"
+  end
 
   def existing_open_position
     return nil unless open_xauusd_positions.exists?
@@ -78,6 +85,10 @@ class RiskRuleService
 
   def open_xauusd_positions
     @open_xauusd_positions ||= @open_positions || Position.open_positions.where(symbol: XAUUSD_SYMBOL)
+  end
+
+  def pending_orders_for_symbol
+    Order.pending.joins(:trade_signal).where(trade_signals: { symbol: @trade_signal.symbol })
   end
 
   def min_confidence
