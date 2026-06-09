@@ -30,7 +30,7 @@ class RiskRuleService
   private
 
   def pending_orders_exist
-    return nil unless pending_orders_for_symbol.exists?
+    return nil unless pending_orders_synced_to_mt4.exists?
 
     "pending orders already exist"
   end
@@ -87,8 +87,11 @@ class RiskRuleService
     @open_xauusd_positions ||= @open_positions || Position.open_positions.where(symbol: XAUUSD_SYMBOL)
   end
 
-  def pending_orders_for_symbol
-    Order.pending.joins(:trade_signal).where(trade_signals: { symbol: @trade_signal.symbol })
+  def pending_orders_synced_to_mt4
+    Order.pending
+      .joins(:trade_signal)
+      .where(trade_signals: { symbol: @trade_signal.symbol })
+      .where.not(ticket: nil)
   end
 
   def min_confidence

@@ -25,6 +25,7 @@ class EndToEndSignalPipelineService
       return hold_response("no order plan available")
     end
 
+    cancel_unsynced_pending_orders!
     risk_result = RiskRuleService.new(trade_signal: trade_signal, order_plan: plan).call
     unless risk_result[:allowed]
       trade_signal.update!(rejection_reason: risk_result[:reason])
@@ -58,6 +59,23 @@ class EndToEndSignalPipelineService
 
   def analysis_service
     @analysis_service ||= OpenaiAnalysisService.new(market_snapshot: @snapshot)
+  end
+
+  def cancel_unsynced_pending_orders!
+    stale = Order.pending
+      .joins(:trade_signal)
+      .where(trade_signals: { symbol: @snapshot.symbol }, ticket: nil)
+
+    return if stale.none?
+
+    count = stale.update_all(status: Order.statuses[:cancelled], updated_at: Time.current)
+    ActivityLogService.record(
+      category: "orders",
+      level: "info",
+      message: "Cancelled #{count} unsynced pending order(s) awaiting MT4 placement",
+      metadata: { symbol: @snapshot.symbol, cancelled_count: count },
+      market_snapshot: @snapshot
+    )
   end
 
   def hold_response(reason)
