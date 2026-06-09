@@ -594,17 +594,91 @@ void PollShogunXOrderLifecycle()
    }
 }
 
+double SymbolPoint(string tradeSymbol)
+{
+   double point = MarketInfo(tradeSymbol, MODE_POINT);
+   if(point <= 0.0)
+      point = Point;
+   return point;
+}
+
+int SymbolStopLevel(string tradeSymbol)
+{
+   int stopLevel = (int)MarketInfo(tradeSymbol, MODE_STOPLEVEL);
+   if(stopLevel < 0)
+      stopLevel = 0;
+   return stopLevel;
+}
+
+double MinStopDistance(string tradeSymbol)
+{
+   return SymbolStopLevel(tradeSymbol) * SymbolPoint(tradeSymbol);
+}
+
+string DescribeTradeError(int err)
+{
+   switch(err)
+   {
+      case 130: return "Invalid stops (SL/TP too close — check broker stop level)";
+      case 131: return "Invalid trade volume";
+      case 134: return "Not enough money";
+      case 136: return "Off quotes";
+      case 138: return "Requote";
+      case 146: return "Trade context busy";
+      default:  return "See MT4 error codes";
+   }
+}
+
+bool NormalizePendingStops(string tradeSymbol, int cmd, double entryPrice, double &stopLoss, double &takeProfit)
+{
+   int digits = (int)MarketInfo(tradeSymbol, MODE_DIGITS);
+   if(digits <= 0)
+      digits = Digits;
+
+   entryPrice = NormalizeDouble(entryPrice, digits);
+   stopLoss = NormalizeDouble(stopLoss, digits);
+   takeProfit = NormalizeDouble(takeProfit, digits);
+
+   double minDistance = MinStopDistance(tradeSymbol);
+   if(minDistance <= 0.0)
+      minDistance = SymbolPoint(tradeSymbol) * 50.0;
+
+   if(cmd == OP_BUYLIMIT || cmd == OP_BUYSTOP)
+   {
+      if(stopLoss > 0.0 && entryPrice - stopLoss < minDistance)
+         stopLoss = NormalizeDouble(entryPrice - minDistance, digits);
+      if(takeProfit > 0.0 && takeProfit - entryPrice < minDistance)
+         takeProfit = NormalizeDouble(entryPrice + minDistance, digits);
+   }
+   else if(cmd == OP_SELLLIMIT || cmd == OP_SELLSTOP)
+   {
+      if(stopLoss > 0.0 && stopLoss - entryPrice < minDistance)
+         stopLoss = NormalizeDouble(entryPrice + minDistance, digits);
+      if(takeProfit > 0.0 && entryPrice - takeProfit < minDistance)
+         takeProfit = NormalizeDouble(entryPrice - minDistance, digits);
+   }
+
+   return true;
+}
+
 int SendPendingOrder(string tradeSymbol, int cmd, double lots, double price, double sl, double tp, string comment, int orderId)
 {
+   NormalizePendingStops(tradeSymbol, cmd, price, sl, tp);
+
    ResetLastError();
    int ticket = OrderSend(tradeSymbol, cmd, lots, price, Slippage, sl, tp, comment, MagicNumber, 0, clrNONE);
 
    if(ticket < 0)
    {
+      int err = GetLastError();
       Log("OrderSend failed cmd=" + IntegerToString(cmd)
           + " symbol=" + tradeSymbol
           + " price=" + DoubleToString(price, Digits)
-          + " err=" + IntegerToString(GetLastError()));
+          + " sl=" + DoubleToString(sl, Digits)
+          + " tp=" + DoubleToString(tp, Digits)
+          + " minStop=" + DoubleToString(MinStopDistance(tradeSymbol), Digits)
+          + " err=" + IntegerToString(err)
+          + " (" + DescribeTradeError(err) + ")");
       return -1;
    }
 
@@ -733,6 +807,12 @@ void ProcessExecutionResponse(string body)
       return;
    }
 
+   Log("Placing " + action + " order_id=" + IntegerToString(orderId)
+       + " symbol=" + tradeSymbol
+       + " entry=" + DoubleToString(entryPrice, Digits)
+       + " sl=" + DoubleToString(stopLoss, Digits)
+       + " tp=" + DoubleToString(takeProfit, Digits));
+
    bool placed = false;
 
    if(ActionMatches(action, "BUY_LIMIT"))
@@ -752,6 +832,9 @@ void ProcessExecutionResponse(string body)
 
    if(placed)
       MarkOrderExecuted(orderId);
+   else
+      Log("Order was NOT placed for order_id=" + IntegerToString(orderId)
+          + " — check OrderSend error above");
 }
 
 void SendSignal()
