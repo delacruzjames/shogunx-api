@@ -5,21 +5,21 @@ class OpenaiAnalysisService
 
   MAX_RETRIES = 3
   DEFAULT_MODEL = "gpt-4o-mini"
-  ANALYSIS_TIMEFRAME = "H4"
+  ANALYSIS_TIMEFRAME = "H1"
 
   PROMPT_TEMPLATE = <<~PROMPT
-    You are a professional institutional XAUUSD trader.
+    You are a professional institutional XAUUSD daily trader.
 
     Trading mode: %{trading_mode}
 
-    Analyze the market data and determine whether a new trade should be taken.
+    Analyze the market data for an intraday trade opportunity (not a multi-day swing hold).
 
     Return ONLY valid JSON:
 
     {
       "action": "BUY|SELL|WAIT",
       "confidence": 0-100,
-      "timeframe": "H4",
+      "timeframe": "H1",
       "reason": "short explanation"
     }
 
@@ -69,6 +69,8 @@ class OpenaiAnalysisService
       else
         analyze_with_openai(summary)
       end
+
+    analysis = apply_daily_inference(analysis, summary) if analysis[:action] == "WAIT"
 
     create_trade_signal!(analysis)
   end
@@ -218,6 +220,11 @@ class OpenaiAnalysisService
     return analysis unless tradable_action?(action)
 
     @trading_mode.apply_tradable_analysis(analysis, summary, min_confidence: min_confidence)
+  end
+
+  def apply_daily_inference(analysis, summary)
+    inferred = @trading_mode.infer_daily_signal(summary, min_confidence: min_confidence)
+    inferred || analysis
   end
 
   def tradable_action?(action)

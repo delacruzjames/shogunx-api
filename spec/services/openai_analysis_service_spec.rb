@@ -93,7 +93,7 @@ RSpec.describe OpenaiAnalysisService do
       expect(trade_signal.market_snapshot).to eq(snapshot)
       expect(trade_signal.action).to eq("BUY")
       expect(trade_signal.confidence).to eq(82)
-      expect(trade_signal.timeframe).to eq("H4")
+      expect(trade_signal.timeframe).to eq("H1")
       expect(trade_signal.reason).to eq("Momentum favors longs above support")
     end
 
@@ -262,7 +262,7 @@ RSpec.describe OpenaiAnalysisService do
       expect(chat_client).to have_received(:chat) do |parameters:|
         prompt = parameters[:messages].last[:content]
         expect(prompt).to include("Trading mode: tactical")
-        expect(prompt).to include("Allow BUY or SELL when H4 and H1 trends are aligned")
+        expect(prompt).to include("Prefer actionable BUY or SELL when H4 and H1 trends are aligned")
       end
     end
 
@@ -308,7 +308,31 @@ RSpec.describe OpenaiAnalysisService do
       expect(trade_signal.reason).to include(TradingMode::TACTICAL_REASON)
     end
 
-    it "returns WAIT in tactical mode when the D1 penalty drops confidence below 70" do
+    it "infers a daily SELL in tactical mode when OpenAI returns WAIT but H4 and H1 align" do
+      snapshot = create_mixed_trend_snapshot(
+        h4_h1_direction: :bearish,
+        d1_direction: :bullish,
+        rsi: 40
+      )
+      chat_client = openai_json_response(
+        action: "WAIT",
+        confidence: 0,
+        reason: "Conflicting signals across timeframes"
+      )
+
+      trade_signal = service_for(
+        snapshot,
+        chat_client: chat_client,
+        trading_mode: TradingMode.new("tactical")
+      ).call
+
+      expect(trade_signal.action).to eq("SELL")
+      expect(trade_signal.confidence).to eq(70)
+      expect(trade_signal.reason).to include("Daily SELL setup")
+      expect(trade_signal.reason).to include(TradingMode::TACTICAL_REASON)
+    end
+
+    it "infers a daily SELL when OpenAI SELL falls below 70 after the D1 penalty" do
       snapshot = create_mixed_trend_snapshot(
         h4_h1_direction: :bearish,
         d1_direction: :bullish,
@@ -326,8 +350,9 @@ RSpec.describe OpenaiAnalysisService do
         trading_mode: TradingMode.new("tactical")
       ).call
 
-      expect(trade_signal.action).to eq("WAIT")
-      expect(trade_signal.reason).to include("below 70 threshold")
+      expect(trade_signal.action).to eq("SELL")
+      expect(trade_signal.confidence).to eq(70)
+      expect(trade_signal.reason).to include("Daily SELL setup")
     end
   end
 
