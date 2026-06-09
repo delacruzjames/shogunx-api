@@ -79,7 +79,7 @@ RSpec.describe RiskRuleService do
       expect(result).to eq(allowed: true, reason: "all checks passed")
     end
 
-    it "rejects when pending orders already exist for the symbol" do
+    it "rejects when pending orders already exist on MT4 for the symbol" do
       signal = build_trade_signal(action: "SELL", confidence: 80)
       Order.create!(
         trade_signal: signal,
@@ -89,13 +89,33 @@ RSpec.describe RiskRuleService do
         stop_loss: 3395,
         take_profit: 3350,
         risk_reward: 2.0,
-        status: :pending
+        status: :pending,
+        ticket: "123456"
       )
 
       result = service(trade_signal: build_trade_signal(action: "SELL", confidence: 80)).call
 
       expect(result[:allowed]).to be(false)
       expect(result[:reason]).to eq("pending orders already exist")
+    end
+
+    it "allows when pending orders exist only in Rails awaiting MT4 placement" do
+      signal = build_trade_signal(action: "SELL", confidence: 80)
+      Order.create!(
+        trade_signal: signal,
+        action: "SELL",
+        entry_type: "SELL_LIMIT",
+        entry_price: 3380,
+        stop_loss: 3395,
+        take_profit: 3350,
+        risk_reward: 2.0,
+        status: :pending,
+        ticket: nil
+      )
+
+      result = service(trade_signal: build_trade_signal(action: "SELL", confidence: 80)).call
+
+      expect(result[:allowed]).to be(true)
     end
 
     it "rejects when an open XAUUSD position exists with opposing direction" do

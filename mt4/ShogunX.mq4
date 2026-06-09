@@ -417,19 +417,44 @@ double OrderNetProfit()
    return OrderProfit() + OrderSwap() + OrderCommission();
 }
 
+bool SymbolHasQuotes(string candidate)
+{
+   if(StringLen(candidate) == 0)
+      return false;
+
+   if(!SymbolSelect(candidate, true))
+      return false;
+
+   return MarketInfo(candidate, MODE_BID) > 0.0;
+}
+
 bool NormalizeTradeSymbol(string symbolFromApi, string &tradeSymbol)
 {
-   if(StringLen(symbolFromApi) == 0)
+   string candidates[6];
+   int count = 0;
+
+   if(StringLen(symbolFromApi) > 0)
+      candidates[count++] = symbolFromApi;
+
+   candidates[count++] = Symbol();
+   candidates[count++] = "XAUUSD";
+   candidates[count++] = "GOLD";
+   candidates[count++] = "XAUUSDm";
+   candidates[count++] = "XAUUSD.";
+
+   int i;
+   for(i = 0; i < count; i++)
    {
-      tradeSymbol = Symbol();
-      return true;
+      if(SymbolHasQuotes(candidates[i]))
+      {
+         tradeSymbol = candidates[i];
+         if(i > 0 || tradeSymbol != symbolFromApi)
+            Log("Using trade symbol: " + tradeSymbol);
+         return true;
+      }
    }
 
-   tradeSymbol = symbolFromApi;
-   if(SymbolSelect(tradeSymbol, true))
-      return true;
-
-   Log("Symbol not available in Market Watch: " + tradeSymbol + " — using chart symbol " + Symbol());
+   Log("No gold symbol with quotes found — falling back to chart symbol " + Symbol());
    tradeSymbol = Symbol();
    return true;
 }
@@ -594,12 +619,68 @@ void PollShogunXOrderLifecycle()
    }
 }
 
+int SymbolDigitsFor(string tradeSymbol)
+{
+   int digits = (int)MarketInfo(tradeSymbol, MODE_DIGITS);
+   if(digits <= 0)
+      digits = Digits;
+   return digits;
+}
+
 double SymbolPoint(string tradeSymbol)
 {
    double point = MarketInfo(tradeSymbol, MODE_POINT);
    if(point <= 0.0)
       point = Point;
    return point;
+}
+
+double NormalizeSymbolPrice(string tradeSymbol, double price)
+{
+   return NormalizeDouble(price, SymbolDigitsFor(tradeSymbol));
+}
+
+bool TradingReady(string tradeSymbol)
+{
+   if(!IsTradeAllowed())
+   {
+      Log("AutoTrading is OFF — click the AutoTrading button in MT4 toolbar");
+      return false;
+   }
+
+   if(MarketInfo(tradeSymbol, MODE_TRADEALLOWED) == 0)
+   {
+      Log("Trading not allowed for symbol " + tradeSymbol);
+      return false;
+   }
+
+   return true;
+}
+
+double NormalizeVolume(string tradeSymbol, double lots)
+{
+   double minLot = MarketInfo(tradeSymbol, MODE_MINLOT);
+   double maxLot = MarketInfo(tradeSymbol, MODE_MAXLOT);
+   double lotStep = MarketInfo(tradeSymbol, MODE_LOTSTEP);
+
+   if(minLot <= 0.0)
+      minLot = 0.01;
+   if(maxLot <= 0.0)
+      maxLot = lots;
+   if(lotStep <= 0.0)
+      lotStep = 0.01;
+
+   if(lots < minLot)
+   {
+      Log("LotSize " + DoubleToString(lots, 2) + " below broker minimum " + DoubleToString(minLot, 2));
+      return -1.0;
+   }
+
+   if(lots > maxLot)
+      lots = maxLot;
+
+   lots = MathFloor(lots / lotStep + 0.0000001) * lotStep;
+   return NormalizeDouble(lots, 2);
 }
 
 int SymbolStopLevel(string tradeSymbol)
@@ -631,9 +712,7 @@ string DescribeTradeError(int err)
 
 bool NormalizePendingStops(string tradeSymbol, int cmd, double entryPrice, double &stopLoss, double &takeProfit)
 {
-   int digits = (int)MarketInfo(tradeSymbol, MODE_DIGITS);
-   if(digits <= 0)
-      digits = Digits;
+   int digits = SymbolDigitsFor(tradeSymbol);
 
    entryPrice = NormalizeDouble(entryPrice, digits);
    stopLoss = NormalizeDouble(stopLoss, digits);
@@ -663,20 +742,53 @@ bool NormalizePendingStops(string tradeSymbol, int cmd, double entryPrice, doubl
 
 int SendPendingOrder(string tradeSymbol, int cmd, double lots, double price, double sl, double tp, string comment, int orderId)
 {
+   if(!TradingReady(tradeSymbol))
+      return -1;
+
+   RefreshRates();
+
+   int digits = SymbolDigitsFor(tradeSymbol);
+   lots = NormalizeVolume(tradeSymbol, lots);
+   if(lots <= 0.0)
+      return -1;
+
+   price = NormalizeSymbolPrice(tradeSymbol, price);
+   sl = NormalizeSymbolPrice(tradeSymbol, sl);
+   tp = NormalizeSymbolPrice(tradeSymbol, tp);
    NormalizePendingStops(tradeSymbol, cmd, price, sl, tp);
 
    ResetLastError();
    int ticket = OrderSend(tradeSymbol, cmd, lots, price, Slippage, sl, tp, comment, MagicNumber, 0, clrNONE);
+
+   if(ticket < 0 && GetLastError() == 130)
+   {
+      Log("OrderSend invalid stops — retrying without SL/TP then modifying");
+      ResetLastError();
+      ticket = OrderSend(tradeSymbol, cmd, lots, price, Slippage, 0, 0, comment, MagicNumber, 0, clrNONE);
+      if(ticket >= 0)
+      {
+         ResetLastError();
+         if(!OrderModify(ticket, price, sl, tp, 0, clrNONE))
+         {
+            int modifyErr = GetLastError();
+            Log("OrderModify SL/TP failed ticket=" + IntegerToString(ticket)
+                + " err=" + IntegerToString(modifyErr)
+                + " (" + DescribeTradeError(modifyErr) + ")");
+         }
+      }
+   }
 
    if(ticket < 0)
    {
       int err = GetLastError();
       Log("OrderSend failed cmd=" + IntegerToString(cmd)
           + " symbol=" + tradeSymbol
-          + " price=" + DoubleToString(price, Digits)
-          + " sl=" + DoubleToString(sl, Digits)
-          + " tp=" + DoubleToString(tp, Digits)
-          + " minStop=" + DoubleToString(MinStopDistance(tradeSymbol), Digits)
+          + " price=" + DoubleToString(price, digits)
+          + " sl=" + DoubleToString(sl, digits)
+          + " tp=" + DoubleToString(tp, digits)
+          + " ask=" + DoubleToString(MarketInfo(tradeSymbol, MODE_ASK), digits)
+          + " bid=" + DoubleToString(MarketInfo(tradeSymbol, MODE_BID), digits)
+          + " minStop=" + DoubleToString(MinStopDistance(tradeSymbol), digits)
           + " err=" + IntegerToString(err)
           + " (" + DescribeTradeError(err) + ")");
       return -1;
@@ -685,9 +797,9 @@ int SendPendingOrder(string tradeSymbol, int cmd, double lots, double price, dou
    Log("OrderSend OK ticket=" + IntegerToString(ticket)
        + " cmd=" + IntegerToString(cmd)
        + " symbol=" + tradeSymbol
-       + " price=" + DoubleToString(price, Digits)
-       + " sl=" + DoubleToString(sl, Digits)
-       + " tp=" + DoubleToString(tp, Digits)
+       + " price=" + DoubleToString(price, digits)
+       + " sl=" + DoubleToString(sl, digits)
+       + " tp=" + DoubleToString(tp, digits)
        + " comment=" + comment);
 
    if(!PostOrderStatusUpdate(orderId, ticket, "placed"))
