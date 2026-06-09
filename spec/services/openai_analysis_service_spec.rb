@@ -15,13 +15,32 @@ RSpec.describe OpenaiAnalysisService do
     ).find { |snapshot| snapshot.timeframe == "H4" }
   end
 
-  def service_for(snapshot, chat_client:, max_retries: 3, news_context_service: nil)
+  def service_for(snapshot, chat_client:, max_retries: 3, news_context_service: nil, trading_mode: TradingMode.new("conservative"))
     described_class.new(
       market_snapshot: snapshot,
       chat_client: chat_client,
       max_retries: max_retries,
-      news_context_service: news_context_service
+      news_context_service: news_context_service,
+      trading_mode: trading_mode
     )
+  end
+
+  def create_mixed_trend_snapshot(h4_h1_direction:, d1_direction:, **attrs)
+    snapshots = create_multi_timeframe_snapshots(**attrs)
+    apply_trend!(snapshots, "D1", d1_direction)
+    apply_trend!(snapshots, "H4", h4_h1_direction)
+    apply_trend!(snapshots, "H1", h4_h1_direction)
+    snapshots.find { |snapshot| snapshot.timeframe == "H4" }
+  end
+
+  def apply_trend!(snapshots, timeframe, direction)
+    snapshot = snapshots.find { |record| record.timeframe == timeframe }
+    ema_values = case direction
+    when :bullish then { ema50: 4510.0, ema200: 4490.0 }
+    when :bearish then { ema50: 4470.0, ema200: 4490.0 }
+    else raise ArgumentError, "Unknown direction: #{direction}"
+    end
+    snapshot.update!(ema_values)
   end
 
   def empty_news_context
@@ -109,7 +128,8 @@ RSpec.describe OpenaiAnalysisService do
         expect(prompt).to include("D1 timeframe:")
         expect(prompt).to include("H1 timeframe:")
         expect(prompt).to include("News Context:")
-        expect(prompt).to include("Never force a trade")
+        expect(prompt).to include("Trading mode: conservative")
+        expect(prompt).to include("Require D1, H4, and H1 trend alignment for BUY or SELL")
         expect(prompt).to include("If confidence is below 70, return WAIT")
         expect(prompt).to include(NewsContextService::CALENDAR_URL)
         expect(prompt).to include("trading_blackout: clear")
@@ -226,6 +246,88 @@ RSpec.describe OpenaiAnalysisService do
 
       expect(trade_signal.action).to eq("WAIT")
       expect(trade_signal.reason).to eq("Range bound")
+    end
+
+    it "includes tactical prompt rules when configured" do
+      snapshot = create_snapshot(ema50: 4490, ema200: 4470, rsi: 60)
+      chat_client = openai_json_response(action: "WAIT", confidence: 0, reason: "No setup")
+
+      service_for(
+        snapshot,
+        chat_client: chat_client,
+        news_context_service: empty_news_context,
+        trading_mode: TradingMode.new("tactical")
+      ).call
+
+      expect(chat_client).to have_received(:chat) do |parameters:|
+        prompt = parameters[:messages].last[:content]
+        expect(prompt).to include("Trading mode: tactical")
+        expect(prompt).to include("Allow BUY or SELL when H4 and H1 trends are aligned")
+      end
+    end
+
+    it "returns WAIT in conservative mode when timeframes are mixed" do
+      snapshot = create_mixed_trend_snapshot(
+        h4_h1_direction: :bearish,
+        d1_direction: :bullish,
+        rsi: 40
+      )
+      chat_client = openai_json_response(
+        action: "SELL",
+        confidence: 85,
+        reason: "Lower timeframe breakdown"
+      )
+
+      trade_signal = service_for(snapshot, chat_client: chat_client).call
+
+      expect(trade_signal.action).to eq("WAIT")
+      expect(trade_signal.reason).to eq("Mixed signals across timeframes")
+    end
+
+    it "allows tactical SELL when H4 and H1 align against a bullish D1" do
+      snapshot = create_mixed_trend_snapshot(
+        h4_h1_direction: :bearish,
+        d1_direction: :bullish,
+        rsi: 40
+      )
+      chat_client = openai_json_response(
+        action: "SELL",
+        confidence: 80,
+        reason: "Lower timeframe breakdown"
+      )
+
+      trade_signal = service_for(
+        snapshot,
+        chat_client: chat_client,
+        trading_mode: TradingMode.new("tactical")
+      ).call
+
+      expect(trade_signal.action).to eq("SELL")
+      expect(trade_signal.confidence).to eq(70)
+      expect(trade_signal.reason).to include("Lower timeframe breakdown")
+      expect(trade_signal.reason).to include(TradingMode::TACTICAL_REASON)
+    end
+
+    it "returns WAIT in tactical mode when the D1 penalty drops confidence below 70" do
+      snapshot = create_mixed_trend_snapshot(
+        h4_h1_direction: :bearish,
+        d1_direction: :bullish,
+        rsi: 40
+      )
+      chat_client = openai_json_response(
+        action: "SELL",
+        confidence: 75,
+        reason: "Moderate setup"
+      )
+
+      trade_signal = service_for(
+        snapshot,
+        chat_client: chat_client,
+        trading_mode: TradingMode.new("tactical")
+      ).call
+
+      expect(trade_signal.action).to eq("WAIT")
+      expect(trade_signal.reason).to include("below 70 threshold")
     end
   end
 

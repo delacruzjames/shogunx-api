@@ -10,6 +10,8 @@ class OpenaiAnalysisService
   PROMPT_TEMPLATE = <<~PROMPT
     You are a professional institutional XAUUSD trader.
 
+    Trading mode: %{trading_mode}
+
     Analyze the market data and determine whether a new trade should be taken.
 
     Return ONLY valid JSON:
@@ -32,30 +34,7 @@ class OpenaiAnalysisService
     7. Volatility conditions
     8. Upcoming ForexFactory high-impact news
 
-    Rules:
-
-    - Never force a trade.
-    - If signals are mixed, return WAIT.
-    - If confidence is below 70, return WAIT.
-    - Avoid trades within 60 minutes before major USD news.
-    - Prefer trend continuation trades.
-    - Penalize overextended price moves.
-    - Reward pullbacks into support/resistance.
-    - Consider higher highs, lower lows, break of structure and momentum shifts.
-
-    Confidence Guide:
-
-    90-100:
-    Strong trend alignment across timeframes.
-
-    70-89:
-    Good setup with acceptable risk.
-
-    50-69:
-    Mixed signals.
-
-    0-49:
-    No trade.
+    %{mode_rules}
 
     Market Summary:
     %{summary}
@@ -70,7 +49,8 @@ class OpenaiAnalysisService
     summary_service: nil,
     news_context_service: nil,
     chat_client: nil,
-    max_retries: MAX_RETRIES
+    max_retries: MAX_RETRIES,
+    trading_mode: nil
   )
     @market_snapshot = market_snapshot
     @symbol = symbol || market_snapshot.symbol
@@ -78,6 +58,7 @@ class OpenaiAnalysisService
     @news_context_service = news_context_service
     @chat_client = chat_client
     @max_retries = max_retries
+    @trading_mode = trading_mode || TradingMode.current
   end
 
   def call
@@ -129,7 +110,7 @@ class OpenaiAnalysisService
       log_prompt(prompt)
       content = request_chat(prompt)
       log_response(content)
-      normalize_analysis(parse_response(content))
+      normalize_analysis(parse_response(content), summary)
     end
   rescue Error => error
     wait_analysis("OpenAI analysis failed: #{error.message}")
@@ -152,6 +133,8 @@ class OpenaiAnalysisService
   def build_prompt(summary)
     format(
       PROMPT_TEMPLATE,
+      trading_mode: @trading_mode.mode,
+      mode_rules: @trading_mode.prompt_rules,
       summary: format_summary(summary),
       news_context: news_context_service.format_for_prompt
     )
@@ -221,21 +204,20 @@ class OpenaiAnalysisService
     raise ParseError, error.message
   end
 
-  def normalize_analysis(payload)
+  def normalize_analysis(payload, summary)
     action = payload["action"].to_s.upcase
     raise ParseError, "Invalid action: #{action}" unless TradeSignal::ACTIONS.include?(action)
 
-    confidence = payload["confidence"].to_i.clamp(0, 100)
-    if tradable_action?(action) && confidence < min_confidence
-      return wait_analysis("Confidence #{confidence} below #{min_confidence} threshold")
-    end
-
-    {
+    analysis = {
       action: action,
-      confidence: confidence,
+      confidence: payload["confidence"].to_i.clamp(0, 100),
       timeframe: payload["timeframe"].presence || ANALYSIS_TIMEFRAME,
       reason: payload["reason"].to_s.presence || "No reason provided"
     }
+
+    return analysis unless tradable_action?(action)
+
+    @trading_mode.apply_tradable_analysis(analysis, summary, min_confidence: min_confidence)
   end
 
   def tradable_action?(action)
